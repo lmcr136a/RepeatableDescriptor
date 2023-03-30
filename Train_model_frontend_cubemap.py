@@ -4,6 +4,7 @@ base class: inherited by other Train_model_*.py
 Author: You-Yi Jau, Rui Zhu
 Date: 2019/12/12
 """
+import os
 import logging
 import torch
 import torch.optim
@@ -19,7 +20,7 @@ from utils.tools import dict_update
 from utils.utils import labels2Dto3D, flattenDetection, labels2Dto3D_flattened
 from utils.utils import pltImshow, saveImg
 from utils.utils import precisionRecall_torch
-from utils.utils import save_checkpoint
+from utils.utils import save_checkpoint, get_log_dir
 
 
 def thd_img(img, thd=0.015):
@@ -195,6 +196,7 @@ class Train_model_frontend_cubemap(object):
             self.net.bnDa.weight.requires_grad = True
             self.net.convDb.weight.requires_grad = True
             self.net.bnDb.weight.requires_grad = True
+            print("\n\n Train only descriptor")
 
         self.optimizer = optimizer
         self.n_iter = setIter(n_iter)
@@ -253,14 +255,14 @@ class Train_model_frontend_cubemap(object):
         running_losses = []
         epoch = 0
         # Train one epoch
-        test = False ##########################################
         while self.n_iter < self.max_iter:
             print("epoch: ", epoch)
             epoch += 1
             self.visualize = True
             for i, sample_train in tqdm(enumerate(self.train_loader)):
                 # train one sample
-                loss_out = self.train_val_sample(sample_train, self.n_iter, True)
+                # loss_out = self.train_val_sample(sample_train, self.n_iter, True)
+                loss_out = 0
                 self.n_iter += 1
                 running_losses.append(loss_out)
                 # run validation
@@ -270,25 +272,25 @@ class Train_model_frontend_cubemap(object):
                         self.train_val_sample(sample_val, self.n_iter + j, False)
                         if j > self.config.get("validation_size", 3):
                             break
+                if self.n_iter % 100 == 0:
+                    iterlog = f"iter {self.n_iter}, loss: {self.loss}"
+                    print(iterlog)
+                    self.write_log(iterlog)
                 # save model
                 if self.n_iter % self.config["save_interval"] == 0:
-                    logging.info(
-                        "save model: every %d interval, current iteration: %d",
-                        self.config["save_interval"],
-                        self.n_iter,
-                    )
                     self.saveModel()
                 # ending condition
                 if self.n_iter > self.max_iter:
                     # end training
                     logging.info("End training: %d", self.n_iter)
                     break
-                if test:
-                    break
-            if test:
-                break
 
         pass
+    def write_log(self, string):
+        logfile = os.path.join(self.save_path, 'log.txt')
+        with open(logfile, 'a') as f:
+            f.write(string)
+            f.write("\n")
 
     def getLabels(self, labels_2D, cell_size, device="cpu"):
         """
@@ -373,11 +375,11 @@ class Train_model_frontend_cubemap(object):
         semi, coarse_desc = outs['semi'], outs['desc']
         semi_warp, coarse_desc_warp = outs_warp['semi'], outs_warp['desc']
 
-        thd = 0.4
+        thd = 0.1
 
         desc = self.interpolate_to_dense(coarse_desc)
         desc_w = self.interpolate_to_dense(coarse_desc_warp)
-
+        
         hms = thd_img(flattenDetection(semi), thd=thd)
         hms_w = thd_img(flattenDetection(semi_warp), thd=thd)
         loss = 0
@@ -389,20 +391,23 @@ class Train_model_frontend_cubemap(object):
 
             dbs= sample['kpts2D'][b].to(self.device)
             dbs_w= sample['kpts2D_w'][b].to(self.device)
+            dbs, dbs_w = (dbs*0.5).int().float(), (dbs_w*0.5).int().float()
 
             output_kpts_idx = []
             output_3Dcoor = []
             dbslist = dbs.detach().cpu().tolist()
             dbslist_w = dbs_w.detach().cpu().tolist()
             for i, pt in enumerate(kpts.detach().cpu().tolist()):
-                if pt in dbslist:
+                pt = self.pt_in_list(pt=pt, dblist=dbslist)
+                if pt:
                     output_kpts_idx.append(i)            # output_kpts_idx: [2, 3, 5, 6, 7, 9, ...] db에 있는 kpt 인덱스
                     output_3Dcoor.append(sample['kpts3D'][b][dbslist.index(pt)])   # [2번의3D좌표, 3번의 3D좌표, 5번의 3D좌표, ...]
 
             output_kpts_idx_w = []
             output_3Dcoor_w = []
             for i, pt_w in enumerate(kpts_w.detach().cpu().tolist()):
-                if pt_w in dbslist_w:
+                pt_w = self.pt_in_list(pt=pt_w, dblist=dbslist_w)
+                if pt_w:
                     output_kpts_idx_w.append(i)
                     output_3Dcoor_w.append(sample['kpts3D_w'][b][dbslist_w.index(pt_w)])
 
@@ -423,15 +428,16 @@ class Train_model_frontend_cubemap(object):
                 kpts, matched_kpts_idx, 
                 kpts_w, matched_kpts_idx_w
             )
-            if self.visualize and b == 0:
-                self.visualize_kpts(
-                    sample['img_path'][b], 
-                    sample['img_path_w'][b], 
-                    kpts[matched_kpts_idx.int()], 
-                    kpts_w[matched_kpts_idx_w.int()], 
-                    n=1000)
-                self.visualize = False
-                self.figname += 1
+            if b == 0:
+                if self.figname < 20:
+                    self.visualize_kpts(
+                        img, 
+                        img_w, 
+                        kpts[matched_kpts_idx.int()], 
+                        kpts_w[matched_kpts_idx_w.int()], 
+                        n=1000)
+                    self.visualize = False
+                    self.figname += 1
             loss += loss_desc
 
         self.loss = loss
@@ -441,12 +447,18 @@ class Train_model_frontend_cubemap(object):
 
         return loss.item()
 
+    def pt_in_list(self, pt, dblist):
+        for xvar in [-1, 0, 1]:
+            for yvar in [-1, 0, 1]:
+                if [pt[0]+xvar, pt[1]+yvar] in dblist:
+                    return [pt[0]+xvar, pt[1]+yvar]
+        return False
     def saveModel(self):
         """
         # save checkpoint for resuming training
         :return:
         """
-        model_state_dict = self.net.module.state_dict()
+        model_state_dict = self.net.state_dict()
         save_checkpoint(
             self.save_path,
             {
@@ -477,7 +489,16 @@ class Train_model_frontend_cubemap(object):
             self.writer.add_image(task + "-" + name, img_tensor[:, :, :], n_iter)
 
     def visualize_kpts(self, imname1, imname2, kpts1, kpts2, n=3):
-        im1, im2 = np.array(Image.open(imname1)), np.array(Image.open(imname2))
+        if type(imname1) == str:
+            im1, im2 = np.array(Image.open(imname1)), np.array(Image.open(imname2))
+        else:
+            if imname1.shape[1] == 3:
+                imname1 = imname1[0].transpose(0,1).transpose(1,2)
+                imname2 = imname2[0].transpose(0,1).transpose(1,2)
+            elif imname.shape[0] == 3:
+                imname1 = imname1.transpose(0,1).transpose(1,2)
+                imname2 = imname2.transpose(0,1).transpose(1,2)
+            im1, im2 = imname1.detach().cpu().numpy(), imname2.detach().cpu().numpy()
         R = 2
         fig, ax = plt.subplots(1, 2) 
         
@@ -500,7 +521,7 @@ class Train_model_frontend_cubemap(object):
             i += 1
             if i>=n:
                 break
-        plt.savefig(f'figures/{self.figname}.png')
+        plt.savefig(os.path.join(self.save_path, f'figures/{self.figname}.png'))
 
     # tensorboard
     def addImg2tensorboard(

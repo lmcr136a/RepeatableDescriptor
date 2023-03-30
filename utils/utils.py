@@ -4,6 +4,7 @@
 # warping
 # loss --> delete if useless
 """
+import os
 
 import numpy as np
 import torch
@@ -119,12 +120,24 @@ def find_files_with_ext(directory, extension='.npz'):
                 # print(l)
         return list_of_files
 
+def get_timeinfo():
+    import datetime 
+    now = datetime.datetime.now()
+    timeinfo = f"{str(now.year)[2:]}{now.month}{now.day}_{now.hour}{now.minute}{now.second}"
+    return timeinfo
+
+def get_log_dir(save_path, runname='RD'):
+    logdir = os.path.join(save_path, f"{get_timeinfo()}_{runname}")
+    os.mkdir(logdir)
+    return logdir
+
 def save_checkpoint(save_path, net_state, epoch, filename='checkpoint.pth.tar'):
-    file_prefix = ['superPointNet']
-    # torch.save(net_state, save_path)
-    filename = '{}_{}_{}'.format(file_prefix[0], str(epoch), filename)
-    torch.save(net_state, save_path/filename)
-    print("save checkpoint to ", filename)
+    save_path = os.path.join(save_path, 'checkpoints')
+    os.makedirs(save_path, exist_ok=True)
+
+    filename = 'RD_{}_epo{}_{}'.format(get_timeinfo(), str(epoch), filename)
+    torch.save(net_state, os.path.join(save_path, filename))
+    print("\nSaved checkpoint to ", filename)
     pass
 
 def load_checkpoint(load_path, filename='checkpoint.pth.tar'):

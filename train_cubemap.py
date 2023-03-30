@@ -17,7 +17,7 @@ import torch.utils.data
 from tensorboardX import SummaryWriter
 
 # from utils.utils import tensor2array, save_checkpoint, load_checkpoint, save_path_formatter
-from utils.utils import getWriterPath
+from utils.utils import getWriterPath, get_log_dir
 from settings import EXPER_PATH
 
 ## loaders: data, model, pretrained model
@@ -55,17 +55,14 @@ def train_joint(config, output_dir, args):
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logging.info('train on device: %s', device)
+    output_dir = get_log_dir('logs')
     with open(os.path.join(output_dir, 'config.yml'), 'w') as f:
         yaml.dump(config, f, default_flow_style=False)
-    # writer = SummaryWriter(getWriterPath(task=args.command, date=True))
-    writer = SummaryWriter(getWriterPath(task=args.command, 
-        exper_name=args.exper_name, date=True))
     ## save data
-    save_path = get_save_path(output_dir)
 
     # data loading
     # data = dataLoader(config, dataset='syn', warp_input=True)
-    data = dataLoader(config, dataset=task, warp_input=True)
+    data = dataLoader(config, dataset=config['data']['dataset'], warp_input=True)
     train_loader, val_loader = data['train_loader'], data['val_loader']
 
     datasize(train_loader, config, tag='train')
@@ -75,10 +72,7 @@ def train_joint(config, output_dir, args):
     from utils.loader import get_module
     train_model_frontend = get_module('', config['front_end_model'])
 
-    train_agent = train_model_frontend(config, save_path=save_path, device=device)
-
-    # writer from tensorboard
-    train_agent.writer = writer
+    train_agent = train_model_frontend(config, save_path=output_dir, device=device)
 
     # feed the data into the agent
     train_agent.train_loader = train_loader
@@ -132,13 +126,13 @@ if __name__ == '__main__':
 
     with open(args.config, 'r') as f:
         config = yaml.safe_load(f)
-    # EXPER_PATH from settings.py
-    output_dir = os.path.join(EXPER_PATH, args.exper_name)
-    os.makedirs(output_dir, exist_ok=True)
+
+    EXPER_PATH = 'logs'
+    os.makedirs(EXPER_PATH, exist_ok=True)
 
     # with capture_outputs(os.path.join(output_dir, 'log')):
 
     logging.info('Running command {}'.format(args.command.upper()))
-    args.func(config, output_dir, args)
+    args.func(config, EXPER_PATH, args)
 
 
