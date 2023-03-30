@@ -62,7 +62,7 @@ class CubemapDataset(data.Dataset):
             return input_image
 
         def _preprocess(image):
-            if self.sizer == 'No resize':
+            if type(self.sizer) == str and self.sizer == 'No resize':
                 h, w, c = image.shape
                 if c == 3:
                     self.sizer = np.array([h, w])

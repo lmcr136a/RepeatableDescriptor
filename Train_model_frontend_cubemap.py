@@ -35,19 +35,6 @@ def thd_img(img, thd=0.015):
     return img
 
 
-def toNumpy(tensor):
-    return tensor.detach().cpu().numpy()
-
-
-def img_overlap(img_r, img_g, img_gray):  # img_b repeat
-    img = np.concatenate((img_gray, img_gray, img_gray), axis=0)
-    img[0, :, :] += img_r[0, :, :]
-    img[1, :, :] += img_g[0, :, :]
-    img[img > 1] = 1
-    img[img < 0] = 0
-    return img
-
-
 class Train_model_frontend_cubemap(object):
     """
     # This is the base class for training classes. Wrap pytorch net to help training process.
@@ -71,10 +58,6 @@ class Train_model_frontend_cubemap(object):
         
         :param config:
             dense_loss, sparse_loss (default)
-            
-        :param save_path:
-        :param device:
-        :param verbose:
         """
         # config
         print("Load Train_model_frontend!!")
@@ -112,28 +95,19 @@ class Train_model_frontend_cubemap(object):
         pass
 
     def printImportantConfig(self):
-        """
-        # print important configs
-        :return:
-        """
-        print("=" * 10, " check!!! ", "=" * 10)
+        self.write_log("=" * 10, " check!!! ", "=" * 10)
+        self.write_log("learning_rate: ", self.config["model"]["learning_rate"])
+        self.write_log("detection_threshold: ", self.config["model"]["detection_threshold"])
+        self.write_log("batch_size: ", self.config["model"]["batch_size"])
+        self.write_log("=" * 10, " descriptor: ", self.desc_loss_type, "=" * 10)
 
-        print("learning_rate: ", self.config["model"]["learning_rate"])
-        print("detection_threshold: ", self.config["model"]["detection_threshold"])
-        print("batch_size: ", self.config["model"]["batch_size"])
-
-        print("=" * 10, " descriptor: ", self.desc_loss_type, "=" * 10)
         for item in list(self.desc_params):
-            print(item, ": ", self.desc_params[item])
+            self.write_log(item, ": ", self.desc_params[item])
 
-        print("=" * 32)
+        self.write_log("=" * 32)
         pass
 
     def dataParallel(self):
-        """
-        put network and optimizer to multiple gpus
-        :return:
-        """
         print("=== Let's use", torch.cuda.device_count(), "GPUs!")
         self.net = self.net
         self.optimizer = self.adamOptim(
@@ -146,7 +120,6 @@ class Train_model_frontend_cubemap(object):
         initiate adam optimizer
         :param net: network structure
         :param lr: learning rate
-        :return:
         """
         print("adam optimizer")
         import torch.optim as optim
@@ -202,28 +175,12 @@ class Train_model_frontend_cubemap(object):
         self.n_iter = setIter(n_iter)
         pass
 
-
-    @property
-    def writer(self):
-        """
-        # writer for tensorboard
-        :return:
-        """
-        # print("get writer")
-        return self._writer
-
-    @writer.setter
-    def writer(self, writer):
-        print("set writer")
-        self._writer = writer
-
     @property
     def train_loader(self):
         """
         loader for dataset, set from outside
         :return:
         """
-        print("get dataloader")
         return self._train_loader
 
     @train_loader.setter
@@ -233,7 +190,6 @@ class Train_model_frontend_cubemap(object):
 
     @property
     def val_loader(self):
-        print("get dataloader")
         return self._val_loader
 
     @val_loader.setter
@@ -252,36 +208,38 @@ class Train_model_frontend_cubemap(object):
         # training info
         logging.info("n_iter: %d", self.n_iter)
         logging.info("max_iter: %d", self.max_iter)
-        running_losses = []
         epoch = 0
         # Train one epoch
         while self.n_iter < self.max_iter:
             print("epoch: ", epoch)
             epoch += 1
             self.visualize = True
+            #####################3
+            print_interval = 100
+            loss_batch = []  # To compute average loss of certain batch, batch == print interval
+
             for i, sample_train in tqdm(enumerate(self.train_loader)):
-                # train one sample
-                # loss_out = self.train_val_sample(sample_train, self.n_iter, True)
-                loss_out = 0
+                loss_out = self.train_val_sample(sample_train, self.n_iter, True)
                 self.n_iter += 1
-                running_losses.append(loss_out)
-                # run validation
+                loss_batch.append(loss_out)
+                
                 if self._eval and self.n_iter % self.config["validation_interval"] == 0:
                     logging.info("====== Validating...")
                     for j, sample_val in enumerate(self.val_loader):
                         self.train_val_sample(sample_val, self.n_iter + j, False)
                         if j > self.config.get("validation_size", 3):
                             break
-                if self.n_iter % 100 == 0:
-                    iterlog = f"iter {self.n_iter}, loss: {self.loss}"
-                    print(iterlog)
+
+                if self.n_iter % print_interval == 0:
+                    iterlog = f"iter {self.n_iter}, loss: {np.mean(loss_batch)}"
+                    loss_batch = []
+                    print("\n", iterlog)
                     self.write_log(iterlog)
-                # save model
+
                 if self.n_iter % self.config["save_interval"] == 0:
                     self.saveModel()
-                # ending condition
+
                 if self.n_iter > self.max_iter:
-                    # end training
                     logging.info("End training: %d", self.n_iter)
                     break
 
@@ -333,34 +291,16 @@ class Train_model_frontend_cubemap(object):
         :return:
         """
         loss_func = nn.CrossEntropyLoss(reduce=False).to(device)
-        # if self.config['data']['gaussian_label']['enable']:
-        #     loss = loss_func_BCE(nn.functional.softmax(semi, dim=1), labels3D_in_loss)
-        #     loss = (loss.sum(dim=1) * mask_3D_flattened).sum()
-        # else:
         loss = loss_func(semi, labels3D_in_loss)
         loss = (loss * mask_3D_flattened).sum()
         loss = loss / (mask_3D_flattened.sum() + 1e-10)
         return loss
 
     def train_val_sample(self, sample, n_iter=0, train=False):
-        """
-        # deprecated: default train_val_sample
-        :param sample:
-        :param n_iter:
-        :param train:
-        :return:
-        """
-        ## get the inputs
         img, img_w = sample['image'].to(self.device), sample['warped_image'].to(self.device)
-
-        # variables
         batch_size, H, W = img.shape[0], img.shape[2], img.shape[3]
         self.batch_size = batch_size
-
-        # zero the parameter gradients
         self.optimizer.zero_grad()
-
-        # forward + backward + optimize
         if train:
             outs, outs_warp = (
                 self.net(img.to(self.device)),
@@ -453,6 +393,7 @@ class Train_model_frontend_cubemap(object):
                 if [pt[0]+xvar, pt[1]+yvar] in dblist:
                     return [pt[0]+xvar, pt[1]+yvar]
         return False
+
     def saveModel(self):
         """
         # save checkpoint for resuming training
@@ -470,23 +411,6 @@ class Train_model_frontend_cubemap(object):
             self.n_iter,
         )
         pass
-
-    def add_single_image_to_tb(self, task, img_tensor, n_iter, name="img"):
-        """
-        # add image to tensorboard for visualization
-        :param task:
-        :param img_tensor:
-        :param n_iter:
-        :param name:
-        :return:
-        """
-        if img_tensor.dim() == 4:
-            for i in range(min(img_tensor.shape[0], 5)):
-                self.writer.add_image(
-                    task + "-" + name + "/%d" % i, img_tensor[i, :, :, :], n_iter
-                )
-        else:
-            self.writer.add_image(task + "-" + name, img_tensor[:, :, :], n_iter)
 
     def visualize_kpts(self, imname1, imname2, kpts1, kpts2, n=3):
         if type(imname1) == str:
@@ -523,250 +447,6 @@ class Train_model_frontend_cubemap(object):
                 break
         plt.savefig(os.path.join(self.save_path, f'figures/{self.figname}.png'))
 
-    # tensorboard
-    def addImg2tensorboard(
-        self,
-        img,
-        labels_2D,
-        semi,
-        img_warp=None,
-        labels_warp_2D=None,
-        mask_warp_2D=None,
-        semi_warp=None,
-        mask_3D_flattened=None,
-        task="training",
-    ):
-        """
-        # deprecated: add images to tensorboard
-        :param img:
-        :param labels_2D:
-        :param semi:
-        :param img_warp:
-        :param labels_warp_2D:
-        :param mask_warp_2D:
-        :param semi_warp:
-        :param mask_3D_flattened:
-        :param task:
-        :return:
-        """
-        # print("add images to tensorboard")
-
-        n_iter = self.n_iter
-        semi_flat = flattenDetection(semi[0, :, :, :])
-        semi_warp_flat = flattenDetection(semi_warp[0, :, :, :])
-
-        thd = self.config["model"]["detection_threshold"]
-        semi_thd = thd_img(semi_flat, thd=thd)
-        semi_warp_thd = thd_img(semi_warp_flat, thd=thd)
-
-        result_overlap = img_overlap(
-            toNumpy(labels_2D[0, :, :, :]), toNumpy(semi_thd), toNumpy(img[0, :, :, :])
-        )
-
-        self.writer.add_image(
-            task + "-detector_output_thd_overlay", result_overlap, n_iter
-        )
-        saveImg(
-            result_overlap.transpose([1, 2, 0])[..., [2, 1, 0]] * 255, "test_0.png"
-        )  # rgb to bgr * 255
-
-        result_overlap = img_overlap(
-            toNumpy(labels_warp_2D[0, :, :, :]),
-            toNumpy(semi_warp_thd),
-            toNumpy(img_warp[0, :, :, :]),
-        )
-        self.writer.add_image(
-            task + "-warp_detector_output_thd_overlay", result_overlap, n_iter
-        )
-        saveImg(
-            result_overlap.transpose([1, 2, 0])[..., [2, 1, 0]] * 255, "test_1.png"
-        )  # rgb to bgr * 255
-
-        mask_overlap = img_overlap(
-            toNumpy(1 - mask_warp_2D[0, :, :, :]) / 2,
-            np.zeros_like(toNumpy(img_warp[0, :, :, :])),
-            toNumpy(img_warp[0, :, :, :]),
-        )
-
-        # writer.add_image(task + '_mask_valid_first_layer', mask_warp[0, :, :, :], n_iter)
-        # writer.add_image(task + '_mask_valid_last_layer', mask_warp[-1, :, :, :], n_iter)
-        ##### print to check
-        # print("mask_2D shape: ", mask_warp_2D.shape)
-        # print("mask_3D_flattened shape: ", mask_3D_flattened.shape)
-        for i in range(self.batch_size):
-            if i < 5:
-                self.writer.add_image(
-                    task + "-mask_warp_origin", mask_warp_2D[i, :, :, :], n_iter
-                )
-                self.writer.add_image(
-                    task + "-mask_warp_3D_flattened", mask_3D_flattened[i, :, :], n_iter
-                )
-        # self.writer.add_image(task + '-mask_warp_origin-1', mask_warp_2D[1, :, :, :], n_iter)
-        # self.writer.add_image(task + '-mask_warp_3D_flattened-1', mask_3D_flattened[1, :, :], n_iter)
-        self.writer.add_image(task + "-mask_warp_overlay", mask_overlap, n_iter)
-
-    def tb_scalar_dict(self, losses, task="training"):
-        """
-        # add scalar dictionary to tensorboard
-        :param losses:
-        :param task:
-        :return:
-        """
-        for element in list(losses):
-            self.writer.add_scalar(task + "-" + element, losses[element], self.n_iter)
-            # print (task, '-', element, ": ", losses[element].item())
-
-    def tb_images_dict(self, task, tb_imgs, max_img=5):
-        """
-        # add image dictionary to tensorboard
-        :param task:
-            str (train, val)
-        :param tb_imgs:
-        :param max_img:
-            int - number of images
-        :return:
-        """
-        for element in list(tb_imgs):
-            for idx in range(tb_imgs[element].shape[0]):
-                if idx >= max_img:
-                    break
-                # print(f"element: {element}")
-                self.writer.add_image(
-                    task + "-" + element + "/%d" % idx,
-                    tb_imgs[element][idx, ...],
-                    self.n_iter,
-                )
-
-
-    def tb_hist_dict(self, task, tb_dict):
-        for element in list(tb_dict):
-            self.writer.add_histogram(
-                task + "-" + element, tb_dict[element], self.n_iter
-            )
-        pass
-
-    def printLosses(self, losses, task="training"):
-        """
-        # print loss for tracking training
-        :param losses:
-        :param task:
-        :return:
-        """
-        for element in list(losses):
-            # print ('add to tb: ', element)
-            print(task, "-", element, ": ", losses[element].item())
-
-    def add2tensorboard_nms(self, img, labels_2D, semi, task="training", batch_size=1):
-        """
-        # deprecated:
-        :param img:
-        :param labels_2D:
-        :param semi:
-        :param task:
-        :param batch_size:
-        :return:
-        """
-        from utils.utils import getPtsFromHeatmap
-        from utils.utils import box_nms
-
-        boxNms = False
-        n_iter = self.n_iter
-
-        nms_dist = self.config["model"]["nms"]
-        conf_thresh = self.config["model"]["detection_threshold"]
-        # print("nms_dist: ", nms_dist)
-        precision_recall_list = []
-        precision_recall_boxnms_list = []
-        for idx in range(batch_size):
-            semi_flat_tensor = flattenDetection(semi[idx, :, :, :]).detach()
-            semi_flat = toNumpy(semi_flat_tensor)
-            semi_thd = np.squeeze(semi_flat, 0)
-            pts_nms = getPtsFromHeatmap(semi_thd, conf_thresh, nms_dist)
-            semi_thd_nms_sample = np.zeros_like(semi_thd)
-            semi_thd_nms_sample[
-                pts_nms[1, :].astype(np.int), pts_nms[0, :].astype(np.int)
-            ] = 1
-
-            label_sample = torch.squeeze(labels_2D[idx, :, :, :])
-            # pts_nms = getPtsFromHeatmap(label_sample.numpy(), conf_thresh, nms_dist)
-            # label_sample_rms_sample = np.zeros_like(label_sample.numpy())
-            # label_sample_rms_sample[pts_nms[1, :].astype(np.int), pts_nms[0, :].astype(np.int)] = 1
-            label_sample_nms_sample = label_sample
-
-            if idx < 5:
-                result_overlap = img_overlap(
-                    np.expand_dims(label_sample_nms_sample, 0),
-                    np.expand_dims(semi_thd_nms_sample, 0),
-                    toNumpy(img[idx, :, :, :]),
-                )
-                self.writer.add_image(
-                    task + "-detector_output_thd_overlay-NMS" + "/%d" % idx,
-                    result_overlap,
-                    n_iter,
-                )
-            assert semi_thd_nms_sample.shape == label_sample_nms_sample.size()
-            precision_recall = precisionRecall_torch(
-                torch.from_numpy(semi_thd_nms_sample), label_sample_nms_sample
-            )
-            precision_recall_list.append(precision_recall)
-
-            if boxNms:
-                semi_flat_tensor_nms = box_nms(
-                    semi_flat_tensor.squeeze(), nms_dist, min_prob=conf_thresh
-                ).cpu()
-                semi_flat_tensor_nms = (semi_flat_tensor_nms >= conf_thresh).float()
-
-                if idx < 5:
-                    result_overlap = img_overlap(
-                        np.expand_dims(label_sample_nms_sample, 0),
-                        semi_flat_tensor_nms.numpy()[np.newaxis, :, :],
-                        toNumpy(img[idx, :, :, :]),
-                    )
-                    self.writer.add_image(
-                        task + "-detector_output_thd_overlay-boxNMS" + "/%d" % idx,
-                        result_overlap,
-                        n_iter,
-                    )
-                precision_recall_boxnms = precisionRecall_torch(
-                    semi_flat_tensor_nms, label_sample_nms_sample
-                )
-                precision_recall_boxnms_list.append(precision_recall_boxnms)
-
-        precision = np.mean(
-            [
-                precision_recall["precision"]
-                for precision_recall in precision_recall_list
-            ]
-        )
-        recall = np.mean(
-            [precision_recall["recall"] for precision_recall in precision_recall_list]
-        )
-        self.writer.add_scalar(task + "-precision_nms", precision, n_iter)
-        self.writer.add_scalar(task + "-recall_nms", recall, n_iter)
-        print(
-            "-- [%s-%d-fast NMS] precision: %.4f, recall: %.4f"
-            % (task, n_iter, precision, recall)
-        )
-        if boxNms:
-            precision = np.mean(
-                [
-                    precision_recall["precision"]
-                    for precision_recall in precision_recall_boxnms_list
-                ]
-            )
-            recall = np.mean(
-                [
-                    precision_recall["recall"]
-                    for precision_recall in precision_recall_boxnms_list
-                ]
-            )
-            self.writer.add_scalar(task + "-precision_boxnms", precision, n_iter)
-            self.writer.add_scalar(task + "-recall_boxnms", recall, n_iter)
-            print(
-                "-- [%s-%d-boxNMS] precision: %.4f, recall: %.4f"
-                % (task, n_iter, precision, recall)
-            )
-
     def get_heatmap(self, semi, det_loss_type="softmax"):
         if det_loss_type == "l2":
             heatmap = self.flatten_64to1(semi)
@@ -775,20 +455,6 @@ class Train_model_frontend_cubemap(object):
         return heatmap
 
     ######## static methods ########
-    @staticmethod
-    def input_to_imgDict(sample, tb_images_dict):
-        # for e in list(sample):
-        #     print("sample[e]", sample[e].shape)
-        #     if (sample[e]).dim() == 4:
-        #         tb_images_dict[e] = sample[e]
-        for e in list(sample):
-            element = sample[e]
-            if type(element) is torch.Tensor:
-                if element.dim() == 4:
-                    tb_images_dict[e] = element
-                # print("shape of ", i, " ", element.shape)
-        return tb_images_dict
-
     @staticmethod
     def interpolate_to_dense(coarse_desc, cell_size=8):
         dense_desc = nn.functional.interpolate(

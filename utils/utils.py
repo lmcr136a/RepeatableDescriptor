@@ -120,15 +120,24 @@ def find_files_with_ext(directory, extension='.npz'):
                 # print(l)
         return list_of_files
 
+def get_2char(num):
+    if len(str(num)) == 1:
+        return '0'+str(num)
+    elif len(str(num)) == 2:
+        return str(num)
+    else:
+        return str(num)[-2:]
+
 def get_timeinfo():
     import datetime 
     now = datetime.datetime.now()
-    timeinfo = f"{str(now.year)[2:]}{now.month}{now.day}_{now.hour}{now.minute}{now.second}"
+    timeinfo = f"{get_2char(now.year)}{get_2char(now.month)}{get_2char(now.day)}_{get_2char(now.hour)}{get_2char(now.minute)}{get_2char(now.second)}"
     return timeinfo
 
 def get_log_dir(save_path, runname='RD'):
     logdir = os.path.join(save_path, f"{get_timeinfo()}_{runname}")
     os.mkdir(logdir)
+    os.mkdir(os.path.join(logdir, 'figures'))
     return logdir
 
 def save_checkpoint(save_path, net_state, epoch, filename='checkpoint.pth.tar'):
