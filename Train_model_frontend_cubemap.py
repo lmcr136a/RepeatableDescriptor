@@ -95,14 +95,14 @@ class Train_model_frontend_cubemap(object):
         pass
 
     def printImportantConfig(self):
-        self.write_log("=" * 10, " check!!! ", "=" * 10)
-        self.write_log("learning_rate: ", self.config["model"]["learning_rate"])
-        self.write_log("detection_threshold: ", self.config["model"]["detection_threshold"])
-        self.write_log("batch_size: ", self.config["model"]["batch_size"])
-        self.write_log("=" * 10, " descriptor: ", self.desc_loss_type, "=" * 10)
+        self.write_log("=" * 10 + " check!!! "+ "=" * 10)
+        self.write_log("learning_rate: "+ str(self.config["model"]["learning_rate"]))
+        self.write_log("detection_threshold: "+ str(self.config["model"]["detection_threshold"]))
+        self.write_log("batch_size: "+ str(self.config["model"]["batch_size"]))
+        self.write_log("=" * 10+ " descriptor: "+ str(self.desc_loss_type)+ "=" * 10)
 
         for item in list(self.desc_params):
-            self.write_log(item, ": ", self.desc_params[item])
+            self.write_log(f'{item}, ": ", {self.desc_params[item]}')
 
         self.write_log("=" * 32)
         pass
