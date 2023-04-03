@@ -98,4 +98,4 @@ train_show_interval: 1000 # one show of the current training from to Tensorboard
 seed: 0
 
 # pretrained: 'logs/magicpoint_synth_t2/checkpoints/superPointNet_100000_checkpoint.pth.tar'
-pretrained: 'logs/magicpoint_synth_t2/checkpoints/3channel.pth.tar'
+pretrained: 'logs/RD_22000/checkpoints/RD_230331_064848_epo22000_checkpoint.pth.tar'

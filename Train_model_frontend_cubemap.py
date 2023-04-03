@@ -22,6 +22,7 @@ from utils.utils import pltImshow, saveImg
 from utils.utils import precisionRecall_torch
 from utils.utils import save_checkpoint, get_log_dir
 
+from utils_custom import get_kpts_from_hm, get_matches
 
 def thd_img(img, thd=0.015):
     """
@@ -324,42 +325,14 @@ class Train_model_frontend_cubemap(object):
         hms_w = thd_img(flattenDetection(semi_warp), thd=thd)
         loss = 0
         for b in range(self.batch_size):
-            rs, cs = torch.where(hms[b][0] > 0)
-            kpts = torch.stack((cs, rs), dim=1)
-            rs_w, cs_w = torch.where(hms_w[b][0] > 0)
-            kpts_w = torch.stack((cs_w, rs_w), dim=1)
-
-            dbs= sample['kpts2D'][b].to(self.device)
-            dbs_w= sample['kpts2D_w'][b].to(self.device)
-            dbs, dbs_w = (dbs*0.5).int().float(), (dbs_w*0.5).int().float()
-
-            output_kpts_idx = []
-            output_3Dcoor = []
-            dbslist = dbs.detach().cpu().tolist()
-            dbslist_w = dbs_w.detach().cpu().tolist()
-            for i, pt in enumerate(kpts.detach().cpu().tolist()):
-                pt = self.pt_in_list(pt=pt, dblist=dbslist)
-                if pt:
-                    output_kpts_idx.append(i)            # output_kpts_idx: [2, 3, 5, 6, 7, 9, ...] db에 있는 kpt 인덱스
-                    output_3Dcoor.append(sample['kpts3D'][b][dbslist.index(pt)])   # [2번의3D좌표, 3번의 3D좌표, 5번의 3D좌표, ...]
-
-            output_kpts_idx_w = []
-            output_3Dcoor_w = []
-            for i, pt_w in enumerate(kpts_w.detach().cpu().tolist()):
-                pt_w = self.pt_in_list(pt=pt_w, dblist=dbslist_w)
-                if pt_w:
-                    output_kpts_idx_w.append(i)
-                    output_3Dcoor_w.append(sample['kpts3D_w'][b][dbslist_w.index(pt_w)])
-
-            matched_idx, matched_idx_w = [], []
-            for i1, k1 in enumerate(output_3Dcoor):
-                for i2, k2 in enumerate(output_3Dcoor_w):
-                    if torch.sum(torch.abs(k1-k2)) < 5.0e-2:
-            #             print(k1, k2)
-                        matched_idx.append(i1)
-                        matched_idx_w.append(i2)
-            matched_kpts_idx = torch.Tensor(output_kpts_idx)[matched_idx]
-            matched_kpts_idx_w = torch.Tensor(output_kpts_idx_w)[matched_idx_w]
+            kpts = get_kpts_from_hm(hms[b])
+            kpts_w = get_kpts_from_hm(hms_w[b])
+            matched_kpts_idx, matched_kpts_idx_w = get_matches(
+                kpts2d=sample['kpts2D'][b], kpts3d=sample['kpts3D'][b],
+                kpts2d_w=sample['kpts2D_w'][b], kpts3d_w=sample['kpts3D_w'][b],
+                kpts_output=kpts, kpts_output_w=kpts_w,
+                device=sample['kpts2D'][b],
+            )
             ############################################################################3
 
             loss_desc = self.descriptor_loss(
@@ -386,13 +359,6 @@ class Train_model_frontend_cubemap(object):
             self.optimizer.step()
 
         return loss.item()
-
-    def pt_in_list(self, pt, dblist):
-        for xvar in [-1, 0, 1]:
-            for yvar in [-1, 0, 1]:
-                if [pt[0]+xvar, pt[1]+yvar] in dblist:
-                    return [pt[0]+xvar, pt[1]+yvar]
-        return False
 
     def saveModel(self):
         """
