@@ -137,17 +137,17 @@ def apply_random_H_batch(im1):
     return im1, Hinv_info
 
 
-def sort_by_nearest_pts(kpts1, kpts2, desc1, desc2):
+def sort_by_similar_pts(kpts1, kpts2, desc1, desc2):
     # sort kpts2 correspondent to kpts1
     ary = torch.cdist(desc2, desc1)
     mask1 = ary == torch.unsqueeze(torch.min(ary,axis=1).values, dim=1)
     mask2 = ary == torch.min(ary, axis=0).values
     idx1, idx2 = torch.where(mask1*mask2)
     color = ary[idx1, idx2]
-    color = 255-color*10
-    color = torch.clamp(color, 0, 255)
+    color = 255-color*200
+    color = torch.clamp(color.int(), 0, 255)
     color = torch.stack([torch.zeros_like(color), color, color], axis=1)
-    return kpts1[idx2], kpts2[idx1], color
+    return kpts1[idx2], kpts2[idx1], color.detach().cpu().tolist()
 
 
 def pt_in_list(pt, dblist):

@@ -5,11 +5,13 @@ from utils_custom import *
 def get_desc_of_kpts(desc, kpts, kpt_idx=[]):
     # desc: 256 * H * W
     # kpts: n * 2
+    kpts = torch.Tensor(kpts).int()
     if kpt_idx==[]:
-        D = desc[:, kpts[kpt_idx.int(), 1], 
-                        kpts[kpt_idx.int(), 0]]
+        D = desc[:, kpts[:, 1], 
+                    kpts[:, 0]]
     else:
-        D = desc[:, kpts[:, 1].int(), kpts[:, 0].int()]
+        D = desc[:, kpts[kpt_idx.int(), 1], 
+                    kpts[kpt_idx.int(), 0]]
     return D
 
 

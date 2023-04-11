@@ -151,7 +151,7 @@ def maching_plot(image0, image1, kpts0, kpts1, mkpts0,
     out[:H1, W0+margin:] = image1*255
     out = np.stack([out]*3, -1)
     
-    R1, R2, R3 = 4,3,2
+    R1, R2, th = 4,3,1
     if show_keypoints:
         kpts0, kpts1 = np.round(kpts0.int().detach().cpu().numpy()), np.round(kpts1.int().detach().cpu().numpy())
         white = (255, 0, 0)
@@ -172,7 +172,7 @@ def maching_plot(image0, image1, kpts0, kpts1, mkpts0,
 
     for (x0, y0), (x1, y1), c in zip(mkpts0, mkpts1, color):
         cv2.line(out, (x0, y0), (x1 + margin + W0, y1),
-                 color=c, thickness=2, lineType=cv2.LINE_AA)
+                 color=c, thickness=th, lineType=cv2.LINE_AA)
         # display line end-points as circles
         cv2.circle(out, (x0, y0), R2, c, -1, lineType=cv2.LINE_AA)
         cv2.circle(out, (x1 + margin + W0, y1), R2, c, -1,
