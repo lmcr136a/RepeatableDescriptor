@@ -4,6 +4,7 @@ base class: inherited by other Train_model_*.py
 Author: You-Yi Jau, Rui Zhu
 Date: 2019/12/12
 """
+import time
 import os
 import logging
 import torch
@@ -18,11 +19,12 @@ from pathlib import Path
 from utils.loader import dataLoader, modelLoader, pretrainedLoader
 from utils.tools import dict_update
 from utils.utils import labels2Dto3D, flattenDetection, labels2Dto3D_flattened
-from utils.utils import pltImshow, saveImg
-from utils.utils import precisionRecall_torch
 from utils.utils import save_checkpoint, get_log_dir
 
-from utils_custom import get_kpts_from_hm, get_matches
+from utils_custom import *
+from utils_custom_visualize import *
+from utils.loss_functions.custom_loss import descriptor_loss_custom, \
+    detection_loss_custom, getLabels, getMasks
 
 def thd_img(img, thd=0.015):
     """
@@ -75,24 +77,21 @@ class Train_model_frontend_cubemap(object):
         self.subpixel = False
         self.loss = 0
         self.train_only_descriptor = config["model"].get('train_only_descriptor', False)
-        print('----\n----\ntrain_only_descriptor: ', self.train_only_descriptor)
+        self.homo_num, self.homo_batch = 100,2
+        print('HOMONUM:', self.homo_num, "  HOMOBATCH:", self.homo_batch)
         self.max_iter = config["train_iter"]
+        self.start = time.time()
 
         if self.config["model"]["sparse_loss"]["enable"]:
-            ## our sparse loss has similar performace, more efficient
             print("use sparse_loss!")
             self.desc_params = self.config["model"]["sparse_loss"]["params"]
-            # from utils.loss_functions.sparse_loss import batch_descriptor_loss_sparse
-            # self.descriptor_loss = batch_descriptor_loss_sparse
-
-            from utils.loss_functions.custom_loss import descriptor_loss_custom
             self.descriptor_loss = descriptor_loss_custom
-
             self.desc_loss_type = "sparse"
 
         self.printImportantConfig()
         self.figname = 0
         self.visualize = False
+        self.thd = 0.05
         pass
 
     def printImportantConfig(self):
@@ -132,7 +131,6 @@ class Train_model_frontend_cubemap(object):
         """
         load model from name and params
         init or load optimizer
-        :return:
         """
         model = self.config["model"]["name"]
         params = self.config["model"]["params"]
@@ -219,7 +217,7 @@ class Train_model_frontend_cubemap(object):
             print_interval = 100
             loss_batch = []  # To compute average loss of certain batch, batch == print interval
 
-            for i, sample_train in tqdm(enumerate(self.train_loader)):
+            for i, sample_train in enumerate(self.train_loader):
                 loss_out = self.train_val_sample(sample_train, self.n_iter, True)
                 self.n_iter += 1
                 loss_batch.append(loss_out)
@@ -232,10 +230,12 @@ class Train_model_frontend_cubemap(object):
                             break
 
                 if self.n_iter % print_interval == 0:
-                    iterlog = f"iter {self.n_iter}, loss: {np.mean(loss_batch)}"
+                    self.before, iterlog = measure_t(
+                        self.start, self.before, i_now=self.n_iter, i_total=self.max_iter, 
+                        others=f"loss: {np.mean(loss_batch)}", get_str=True)
                     loss_batch = []
-                    print("\n", iterlog)
                     self.write_log(iterlog)
+                    self.figname = 0
 
                 if self.n_iter % self.config["save_interval"] == 0:
                     self.saveModel()
@@ -302,61 +302,106 @@ class Train_model_frontend_cubemap(object):
         batch_size, H, W = img.shape[0], img.shape[2], img.shape[3]
         self.batch_size = batch_size
         self.optimizer.zero_grad()
-        if train:
-            outs, outs_warp = (
-                self.net(img.to(self.device)),
-                self.net(img_w.to(self.device)),
-            )
-        else:
-            with torch.no_grad():
+
+        B = 0
+        dbk2d, dbk2d_w, dbk3d, dbk3d_w = sample['kpts2D'][B],sample['kpts2D_w'][B],sample['kpts3D'][B],sample['kpts3D_w'][B]        
+        self.thd = 0.05
+        for h in tqdm(range(0, self.homo_num, self.homo_batch), desc=f'{self.homo_num} Homography'):
+            
+            loss = 0
+            Hidx1, Hidx2 = get_Hidx(h, self.homo_batch, self.homo_num)
+            H_NUM_THIS = Hidx2-Hidx1
+
+            im_trf_cat, Hinv_infos = get_homo_img_cat(img, H_NUM_THIS)
+            im_trf_cat_w, Hinv_infos_w = get_homo_img_cat(img_w, H_NUM_THIS)
+
+            if train:
                 outs, outs_warp = (
-                    self.net(img.to(self.device)),
-                    self.net(img_w.to(self.device)),
+                    self.net(im_trf_cat[B]),  # B는 배치를 뜻함, 배치는 1로 고정, (b, bh, c, H, W)
+                    self.net(im_trf_cat_w[B]),# 모델 인풋은 4차원이어야 하므로 bh를 b처럼 이용
                 )
-        semi, coarse_desc = outs['semi'], outs['desc']
-        semi_warp, coarse_desc_warp = outs_warp['semi'], outs_warp['desc']
+            else:
+                with torch.no_grad():
+                    outs, outs_warp = (
+                    self.net(im_trf_cat[B]),
+                    self.net(im_trf_cat_w[B]),
+                    )
 
-        thd = 0.1
+            # [homo_batch, 65, Hc, Wc]       ex) [20, 65, 128, 128] for 1024 size image
+            semi, coarse_desc = outs['semi'], outs['desc']
+            hms = flattenDetection(semi)
+            semi_w, coarse_desc_w = outs_warp['semi'], outs_warp['desc']
+            hms_w = flattenDetection(semi_w)
 
-        desc = self.interpolate_to_dense(coarse_desc)
-        desc_w = self.interpolate_to_dense(coarse_desc_warp)
-        
-        hms = thd_img(flattenDetection(semi), thd=thd)
-        hms_w = thd_img(flattenDetection(semi_warp), thd=thd)
-        loss = 0
-        for b in range(self.batch_size):
-            kpts = get_kpts_from_hm(hms[b])
-            kpts_w = get_kpts_from_hm(hms_w[b])
-            matched_kpts_idx, matched_kpts_idx_w = get_matches(
-                kpts2d=sample['kpts2D'][b], kpts3d=sample['kpts3D'][b],
-                kpts2d_w=sample['kpts2D_w'][b], kpts3d_w=sample['kpts3D_w'][b],
-                kpts_output=kpts, kpts_output_w=kpts_w,
-                device=sample['kpts2D'][b],
-            )
-            ############################################################################3
+            desc = self.interpolate_to_dense(coarse_desc)
+            desc_w = self.interpolate_to_dense(coarse_desc_w)
 
-            loss_desc = self.descriptor_loss(
-                desc[b],
-                desc_w[b],
-                kpts, matched_kpts_idx, 
-                kpts_w, matched_kpts_idx_w
-            )
-            if b == 0:
-                if self.figname < 20:
-                    self.visualize_kpts(
-                        img, 
-                        img_w, 
-                        kpts[matched_kpts_idx.int()], 
-                        kpts_w[matched_kpts_idx_w.int()], 
-                        n=1000)
-                    self.visualize = False
-                    self.figname += 1
-            loss += loss_desc
+            # mask2D:            [3, 1024, 1024]  labels3D_in_loss: [3, 128, 128]      
+            # mask_3D_flattened: [3, 128, 128]    semi:             [3, 65, 128, 128]
+            imgshape = (H_NUM_THIS, H, W)
+            labels3D_in_loss = getLabels(imgshape, dbk2d, device=self.device)
+            labels3D_in_loss_w = getLabels(imgshape, dbk2d, device=self.device)
 
-        self.loss = loss
-        if train:
-            loss.backward()
-            self.optimizer.step()
+            for bh in range(H_NUM_THIS):  # 여기서부터 하나의 이미지만 취급, 배치 없음
+                self.n_iter += 1  ##########
+
+                # H 없을때
+                # hms = thd_img(flattenDetection(semi), thd=self.thd)
+                # hms_w = thd_img(flattenDetection(semi_w), thd=self.thd)
+                # kpts = get_kpts_from_hm(hms)  # hms: [hb, 1, 1024, 2024]
+                # kpts_w = get_kpts_from_hm(hms_w)  # kpts: list
+                from copy import deepcopy as dc
+                ############################################################################3
+                mask_3D_flattened, mask2D = getMasks(imgshape, dc(Hinv_infos[bh]), device=self.device)
+                loss_det = detection_loss_custom(
+                    semi[bh], labels3D_in_loss[bh], mask_3D_flattened, device=self.device
+                )
+
+                mask_3D_flattened_w, mask2D_w = getMasks(imgshape, dc(Hinv_infos_w[bh]), device=self.device)
+                loss_det_w = detection_loss_custom(
+                    semi_w[bh], labels3D_in_loss_w[bh], mask_3D_flattened_w, device=self.device
+                )
+                ############################################################################
+
+                hm = apply_H_from_info(hms[bh], Hinv_infos[bh])
+                hm = thd_img(hm, thd=self.thd)
+                kpts = get_kpts_from_hm(hm, mask2D)
+
+                hm_w = apply_H_from_info(hms_w[bh], Hinv_infos_w[bh])
+                hm_w = thd_img(hm_w, thd=self.thd)
+                kpts_w = get_kpts_from_hm(hm_w, mask2D_w)
+
+                matched_kpts_idx, matched_kpts_idx_w = get_matches(
+                    dbk2d, dbk3d, dbk2d_w, dbk3d_w,
+                    kpts, kpts_w,
+                    device=self.device,
+                )
+                # desc: [3, 256, 1024, 1024]   kpts: [N, 2]    matched_kpts_idx: [0]
+                loss_desc = self.descriptor_loss(
+                    desc[bh],
+                    desc_w[bh],
+                    kpts, matched_kpts_idx, 
+                    kpts_w, matched_kpts_idx_w
+                )
+                gamma = 0.2
+                print('----', np.array(matched_kpts_idx).shape, ' matched kpts')
+                print(gamma*loss_desc.data ,loss_det.data ,loss_det_w.data)
+                loss += gamma*loss_desc + loss_det + loss_det_w
+
+                if bh == 0:
+                    if self.figname < 10:
+                        self.visualize_kpts(img, img_w, dbk2d, dbk2d_w, name='db', n=3000)
+                        kpts, kpts_w = torch.Tensor(kpts), torch.Tensor(kpts_w)
+                        matched_kpts_idx, matched_kpts_idx_w = torch.Tensor(matched_kpts_idx), torch.Tensor(matched_kpts_idx_w)
+                        maching_plot(img, img_w, kpts, kpts_w, 
+                            kpts[matched_kpts_idx.int()], kpts_w[matched_kpts_idx_w.int()], 
+                            path=os.path.join(self.save_path, f'figures/iter{self.n_iter}_{self.figname}.png'))
+                        self.visualize = False
+                        self.figname += 1
+            self.loss = loss
+            if train:
+                loss.backward()
+                self.optimizer.step()
 
         return loss.item()
 
@@ -378,14 +423,24 @@ class Train_model_frontend_cubemap(object):
         )
         pass
 
-    def visualize_kpts(self, imname1, imname2, kpts1, kpts2, n=3):
+    def save_sample(self, img, figname):
+        if img.shape[1] == 3:
+            img = img[0].transpose(0,1).transpose(1,2)
+        elif img.shape[0] == 3:
+            img = img.transpose(0,1).transpose(1,2)
+        img= img.detach().cpu().numpy()
+        plt.figure()
+        plt.imshow(img)
+        plt.savefig(os.path.join(self.save_path, f'figures/iter{self.n_iter}_{figname}.png'))
+
+    def visualize_kpts(self, imname1, imname2, kpts1, kpts2, name='', n=3):
         if type(imname1) == str:
             im1, im2 = np.array(Image.open(imname1)), np.array(Image.open(imname2))
         else:
             if imname1.shape[1] == 3:
                 imname1 = imname1[0].transpose(0,1).transpose(1,2)
                 imname2 = imname2[0].transpose(0,1).transpose(1,2)
-            elif imname.shape[0] == 3:
+            elif imname1.shape[0] == 3:
                 imname1 = imname1.transpose(0,1).transpose(1,2)
                 imname2 = imname2.transpose(0,1).transpose(1,2)
             im1, im2 = imname1.detach().cpu().numpy(), imname2.detach().cpu().numpy()
@@ -396,22 +451,20 @@ class Train_model_frontend_cubemap(object):
         i = 0
         for x, y in kpts1:
             ax[0].add_patch(plt.Circle((x, y), R, color='r'))
-            ax[0].text(x, y, str(i))
+            # ax[0].text(x, y, str(i))
             i += 1
             if i>=n:
                 break
                 
-        ax[0].text(0, 100, '(0, 100)')
-        ax[0].text(0, 0, '(0, 0)')
         i=0
         ax[1].imshow(im2)
         for x, y in kpts2:
             ax[1].add_patch(plt.Circle((x, y), R, color='r'))
-            ax[1].text(x, y, str(i))
+            # ax[1].text(x, y, str(i))
             i += 1
             if i>=n:
                 break
-        plt.savefig(os.path.join(self.save_path, f'figures/{self.figname}.png'))
+        plt.savefig(os.path.join(self.save_path, f'figures/iter{self.n_iter}_{self.figname}_{name}.png'))
 
     def get_heatmap(self, semi, det_loss_type="softmax"):
         if det_loss_type == "l2":

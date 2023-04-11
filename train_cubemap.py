@@ -10,10 +10,11 @@ import yaml
 import os
 import logging
 
+import random
 import torch
 import torch.optim
 import torch.utils.data
-
+import numpy as np
 from tensorboardX import SummaryWriter
 
 # from utils.utils import tensor2array, save_checkpoint, load_checkpoint, save_path_formatter
@@ -131,6 +132,17 @@ if __name__ == '__main__':
     os.makedirs(EXPER_PATH, exist_ok=True)
 
     # with capture_outputs(os.path.join(output_dir, 'log')):
+
+    seed = 9
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed) # if use multi-GPU
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    np.random.seed(seed)
+    random.seed(seed)
+
+
 
     logging.info('Running command {}'.format(args.command.upper()))
     args.func(config, EXPER_PATH, args)

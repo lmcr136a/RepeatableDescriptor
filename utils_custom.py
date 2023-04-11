@@ -1,10 +1,153 @@
 import torch
+import cv2
+import random
+import torchvision
+import numpy as np
+import scipy.io as io
+import matplotlib.pyplot as plt
+import torch.nn.functional as F
+import time
+import os
 
+from PIL import Image
 
-def get_kpts_from_hm(hm):
-    rs, cs = torch.where(hm[0] > 0)
-    kpts = torch.stack((cs, rs), dim=1)
+def measure_t(start, before=None, i_now=None, i_total=None, others=None, get_str=False):
+    now = time.time()
+    runt = now-start
+    h = runt//3600
+    m = (runt - h*3600)//60
+    s = round(runt - h*3600 - m*60)
+    if i_now and i_total:
+        prtstr = f"Iter {i_now+1} in {i_total}, \
+                {round((i_now+1)/i_total, 3) * 100}%"
+    else: 
+        prtstr = f"Runtime {h}h {m}m {s}s"
+
+    if before:
+        runt2 = before-start
+        h2 = runt2//3600
+        m2 = (runt2 - h2*3600)//60
+        s2 = round(runt2 - h2*3600 - m2*60)
+        prtstr += f" ({h2}h {m2}m {s2}s)"
+
+    if others:
+        prtstr += f"  {others}"
+    print(prtstr)
+    if get_str:
+        return now, prtstr
+    return now 
+
+def get_kpts_from_hm(hm, mask=None):
+    if str(type(mask)) == "<class 'NoneType'>":
+        mask = torch.ones(hm.shape)
+
+    hm = hm.squeeze().detach().cpu()
+    mask = mask[0]
+
+    rs, cs = torch.where(hm*mask > 0)
+    kpts = torch.stack((cs, rs), dim=1).tolist()
     return kpts
+
+
+def apply_random_H(im1):
+    theta = 30                        # rotation, -30~30 degree
+    t = 100                           # translation, -100~100
+    p = 100                            # perspective, -10~10
+    theta=(np.random.rand(1)*2*theta-theta)[0] # -30~30
+    t_x, t_y = (np.random.rand(2)*2*t-t)[:]    # -100~100
+    scale= (np.random.rand(1)*0.8 + 0.6)[0] # 0.7~1.5
+    
+    H, W = im1.shape[1:]
+    startpoints=[[0,0],[0,W], [H, 0], [H, W]]
+    startpoints=np.array([[0., 0.], [0., 1.], [1., 1.], [1., 0.]])
+    startpoints *= np.array([H,W])
+    
+    endpoints = []
+    for pt in startpoints:
+        xvar, yvar = np.random.rand(2)*2*p-p
+        endpoints.append([pt[0]+xvar, pt[1]+yvar])
+    im1 = torchvision.transforms.functional.perspective(im1, 
+                                startpoints=startpoints,  
+                                endpoints=endpoints,
+                                interpolation=torchvision.transforms.InterpolationMode.BILINEAR)
+    
+    dft_a, dft_t, dft_s, dft_sh = 0, [0,0], 1, [0,0]
+    
+    im1 = torchvision.transforms.functional.affine(im1, angle=theta, translate=dft_t,      scale=dft_s, shear=dft_sh)
+    im1 = torchvision.transforms.functional.affine(im1, angle=dft_a, translate=[t_x, t_y], scale=dft_s, shear=dft_sh)
+    im1 = torchvision.transforms.functional.affine(im1, angle=dft_a, translate=dft_t,      scale=scale, shear=dft_sh)
+    
+    Hinv_info = {
+        'theta':-theta, 't_x':-t_x, 't_y':-t_y, 'scale':1/scale,
+        'startpoints':endpoints, 'endpoints':startpoints
+            }
+    
+    return im1, Hinv_info
+
+
+def apply_H_from_info(im1, Hinfo): ## for inverse H, 이미지는 배치 가능인데 Hinfo는 배치로 안됨
+    dft_a, dft_t, dft_s, dft_sh = 0, [0,0], 1, [0,0]
+    im1 = torchvision.transforms.functional.affine(im1, angle=dft_a, translate=dft_t,      scale=Hinfo['scale'], shear=dft_sh)
+    im1 = torchvision.transforms.functional.affine(im1, angle=dft_a, translate=[Hinfo['t_x'], Hinfo['t_y']], scale=dft_s, shear=dft_sh)
+    im1 = torchvision.transforms.functional.affine(im1, angle=Hinfo['theta'], translate=dft_t,      scale=dft_s, shear=dft_sh)
+
+    im1 = torchvision.transforms.functional.perspective(im1, 
+                                startpoints=Hinfo['startpoints'],  
+                                endpoints=Hinfo['endpoints'],
+                                interpolation=torchvision.transforms.InterpolationMode.BILINEAR)
+    return im1
+
+
+def apply_random_H_batch(im1):
+    theta = 30                        # rotation, -30~30 degree
+    t = 100                           # translation, -100~100
+    p = 100                            # perspective, -10~10
+    theta=(np.random.rand(1)*2*theta-theta)[0] # -30~30
+    t_x, t_y = (np.random.rand(2)*2*t-t)[:]    # -100~100
+    scale= (np.random.rand(1)*0.8 + 0.6)[0] # 0.7~1.5
+    
+    H, W = im1.shape[2:]
+    
+    startpoints=[[0,0],[0,W], [H, 0], [H, W]]
+    startpoints=np.array([[0., 0.], [0., 1.], [1., 1.], [1., 0.]])
+    startpoints *= np.array([H,W])
+
+    
+    endpoints = []
+    for pt in startpoints:
+        xvar, yvar = np.random.rand(2)*2*p-p
+        endpoints.append([pt[0]+xvar, pt[1]+yvar])
+        
+    im1 = torchvision.transforms.functional.perspective(im1, 
+                                startpoints=startpoints,  
+                                endpoints=endpoints,
+                                interpolation=torchvision.transforms.InterpolationMode.BILINEAR)
+    
+    dft_a, dft_t, dft_s, dft_sh = 0, [0,0], 1, [0,0]
+    
+    im1 = torchvision.transforms.functional.affine(im1, angle=theta, translate=dft_t,      scale=dft_s, shear=dft_sh)
+    im1 = torchvision.transforms.functional.affine(im1, angle=dft_a, translate=[t_x, t_y], scale=dft_s, shear=dft_sh)
+    im1 = torchvision.transforms.functional.affine(im1, angle=dft_a, translate=dft_t,      scale=scale, shear=dft_sh)
+    
+    Hinv_info = {
+        'theta':-theta, 't_x':-t_x, 't_y':-t_y, 'scale':1/scale,
+        'startpoints':endpoints, 'endpoints':startpoints
+            }
+    
+    return im1, Hinv_info
+
+
+def sort_by_nearest_pts(kpts1, kpts2, desc1, desc2):
+    # sort kpts2 correspondent to kpts1
+    ary = torch.cdist(desc2, desc1)
+    mask1 = ary == torch.unsqueeze(torch.min(ary,axis=1).values, dim=1)
+    mask2 = ary == torch.min(ary, axis=0).values
+    idx1, idx2 = torch.where(mask1*mask2)
+    color = ary[idx1, idx2]
+    color = 255-color*10
+    color = torch.clamp(color, 0, 255)
+    color = torch.stack([torch.zeros_like(color), color, color], axis=1)
+    return kpts1[idx2], kpts2[idx1], color
 
 
 def pt_in_list(pt, dblist):
@@ -15,27 +158,25 @@ def pt_in_list(pt, dblist):
     return False
 
 
-def get_desc_of_kpts(desc, kpts, kpt_idx=None):
-    # desc: 256 * H * W
-    # kpts: n * 2
-    if kpt_idx:
-        D = desc[:, kpts[kpt_idx.int(), 1], 
-                        kpts[kpt_idx.int(), 0]]
-    else:
-        D = desc[:, kpts[:, 1], kpts[:, 0]]
-    return D
-
-
-def get_matches(kpts2d, kpts3d, kpts2d_w, kpts3d_w, kpts_output, kpts_output_w, device):
+def get_matches(kpts2d, kpts3d, kpts2d_w, kpts3d_w, kpts_output, 
+                kpts_output_w, device, thd=0.05):
+    # kpts2d:       N * 2
+    # kpts3d:       N * 3
+    # kpts_output:  homo_batch * N_pred * 2 ,  list type!
+    # if len(np.array(kpts_output).shape) == 2:
+    #     kpts_output = [kpts_output]
+    #     kpts_output_w = [kpts_output_w]
+    # homo_batch = len(kpts_output)
     dbs= kpts2d.to(device)
     dbs_w= kpts2d_w.to(device)
-    dbs, dbs_w = (dbs*0.5).int().float(), (dbs_w*0.5).int().float()
+    dbslist, dbslist_w = (dbs*0.5).int().float().detach().cpu().tolist(), (dbs_w*0.5).int().float().detach().cpu().tolist()
 
+    # matched_kpts_idx, matched_kpts_idx_w = [], []
+    # for homo_iter in range(homo_batch):
     output_kpts_idx = []
     output_3Dcoor = []
-    dbslist = dbs.detach().cpu().tolist()
-    dbslist_w = dbs_w.detach().cpu().tolist()
-    for i, pt in enumerate(kpts_output.detach().cpu().tolist()):
+    # for i, pt in enumerate(kpts_output[homo_iter]):
+    for i, pt in enumerate(kpts_output):
         pt = pt_in_list(pt=pt, dblist=dbslist)
         if pt:
             output_kpts_idx.append(i)            # output_kpts_idx: [2, 3, 5, 6, 7, 9, ...] db에 있는 kpt 인덱스
@@ -43,7 +184,8 @@ def get_matches(kpts2d, kpts3d, kpts2d_w, kpts3d_w, kpts_output, kpts_output_w, 
 
     output_kpts_idx_w = []
     output_3Dcoor_w = []
-    for i, pt_w in enumerate(kpts_output_w.detach().cpu().tolist()):
+    # for i, pt_w in enumerate(kpts_output_w[homo_iter]):
+    for i, pt_w in enumerate(kpts_output_w):
         pt_w = pt_in_list(pt=pt_w, dblist=dbslist_w)
         if pt_w:
             output_kpts_idx_w.append(i)
@@ -52,10 +194,47 @@ def get_matches(kpts2d, kpts3d, kpts2d_w, kpts3d_w, kpts_output, kpts_output_w, 
     matched_idx, matched_idx_w = [], []
     for i1, k1 in enumerate(output_3Dcoor):
         for i2, k2 in enumerate(output_3Dcoor_w):
-            if torch.sum(torch.abs(k1-k2)) < 5.0e-2:
-    #             print(k1, k2)
+            if torch.sum(torch.abs(k1-k2)) < thd:
                 matched_idx.append(i1)
                 matched_idx_w.append(i2)
-    matched_kpts_idx = torch.Tensor(output_kpts_idx)[matched_idx]
-    matched_kpts_idx_w = torch.Tensor(output_kpts_idx_w)[matched_idx_w]
+    # matched_kpts_idx.append(torch.Tensor(output_kpts_idx)[matched_idx].tolist())
+    # matched_kpts_idx_w.append(torch.Tensor(output_kpts_idx_w)[matched_idx_w].tolist())
+    matched_kpts_idx = torch.Tensor(output_kpts_idx)[matched_idx].tolist()
+    matched_kpts_idx_w = torch.Tensor(output_kpts_idx_w)[matched_idx_w].tolist()
     return matched_kpts_idx, matched_kpts_idx_w
+
+def get_dup_kpts(kpts, kpts3d, cnt_thd=1):
+    # at least twice dup pts of kpts2d and corresponding 3dkpts
+    unq, idx, cnt = np.unique(kpts, axis=0, return_inverse=True, return_counts=True)
+    cnt_mask = cnt > cnt_thd
+    dup_kpts = unq[cnt_mask]
+    # indices for kpts3d
+    cnt_idx, = np.nonzero(cnt_mask)
+    idx_mask = np.in1d(idx, cnt_idx)
+    idx_idx, = np.nonzero(idx_mask)
+    srt_idx = np.argsort(idx[idx_mask])
+    dup_idx = np.split(idx_idx[srt_idx], np.cumsum(cnt[cnt_mask])[:-1])
+    dup_idx = [d[0] for d in dup_idx]
+    dup_kpts3d = kpts3d[dup_idx]
+    return dup_kpts, dup_kpts3d
+
+def get_homo_img_cat(img, HOMOGRAPHY_NUM):
+    im_trf_cat, Hinv_infos = torch.Tensor(), []
+    for homography_iter in range(HOMOGRAPHY_NUM):
+        im_trf, Hinv_info = apply_random_H_batch(img)
+        Hinv_infos.append(Hinv_info)
+        if im_trf_cat.shape[0] == 0:
+            im_trf = torch.unsqueeze(im_trf, dim=1)
+            im_trf_cat = im_trf
+        else:
+            im_trf = torch.unsqueeze(im_trf, dim=1)
+            im_trf_cat = torch.cat([im_trf_cat, im_trf], axis=1)
+    return im_trf_cat, Hinv_infos
+
+
+def get_Hidx(i, HOMO_BATCH, HOMO_NUM):
+    Hidx1, Hidx2 = i, i+HOMO_BATCH
+    if Hidx2 > HOMO_NUM:
+        Hidx2 = HOMO_NUM
+    return Hidx1, Hidx2
+

@@ -28,6 +28,10 @@ class CubemapDataset(data.Dataset):
     }
 
     def __init__(self, transform=None, **config):
+        self.custom_dir = 'zzours'
+        self.not_warped_images = config.get('not_warped_images', False)
+        print("not_warped_images: ", self.not_warped_images)
+
         self.config = self.default_config
         self.config = dict_update(self.config, config)
         self.files = self._init_dataset(**self.config)
@@ -42,9 +46,8 @@ class CubemapDataset(data.Dataset):
         else:
             self.sizer = 'No resize'
 
-        self.custom_dir = 'zzours'
         self.RTfile = io.loadmat(os.path.join(self.custom_dir, 'RTDB.mat'))
-        self.Kptfile = io.loadmat(os.path.join(self.custom_dir, 'KeyPts2D3D.mat'))
+        self.Kptfile = io.loadmat(os.path.join(self.custom_dir, 'KeyPts2D3D_1024_H_thd0.25_cnt2.mat'))
         pass
 
     def __getitem__(self, index):
@@ -146,10 +149,13 @@ class CubemapDataset(data.Dataset):
             #     continue
             # if config['alteration'] == 'v' and path.stem[0] != 'v':
             #     continue
-            num_images = 5
+            # num_images = 5
             file_ext = '.png'
             for angle in range(0, 360, 5):
-                near_angles = get_near_angle_filenames(angle)
+                if self.not_warped_images:
+                    near_angles = [angle]
+                else:
+                    near_angles = get_near_angle_filenames(angle)
                 for near_angle in near_angles:
                     image_paths.append(str(Path(path, f"th{angle}{file_ext}")))
                     warped_image_paths.append(str(Path(path, f"th{near_angle}{file_ext}")))

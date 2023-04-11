@@ -2,57 +2,9 @@ data:
 #    name: 'synthetic_shapes'
     dataset: 'CubemapDataset'
     primitives: 'all'
-    preprocessing: ## didn't do this
-        blur_size: 21
+    not_warped_images: False   ## True if for generating DB or inference
+    preprocessing: 
         resize: [1024, 1024]
-    augmentation:
-        photometric:
-            enable: true ## for class to recognize
-            enable_train: true
-            enable_val: false
-            primitives: [
-                'random_brightness', 'random_contrast', 'additive_speckle_noise',
-                'additive_gaussian_noise', 'additive_shade', 'motion_blur' ]
-            params:
-                random_brightness: {max_abs_change: 75}
-                random_contrast: {strength_range: [0.3, 1.8]}
-                additive_gaussian_noise: {stddev_range: [0, 15]}
-                additive_speckle_noise: {prob_range: [0, 0.0035]}
-                additive_shade:
-                    transparency_range: [-0.5, 0.8]
-                    kernel_size_range: [50, 100]
-                motion_blur: {max_kernel_size: 7} 
-        homographic:
-            enable: true
-            enable_train: true
-            enable_val: false
-            params:
-                translation: true
-                rotation: true
-                scaling: true
-                perspective: true
-                scaling_amplitude: 0.2
-                perspective_amplitude_x: 0.2
-                perspective_amplitude_y: 0.2
-                patch_ratio: 0.8
-                max_angle: 1.57  # 3.14
-                allow_artifacts: true
-                translation_overflow: 0.05
-            valid_border_margin: 2
-    warped_pair:
-        enable: false # false when training only on detector
-        params:
-            translation: true
-            rotation: true
-            scaling: true
-            perspective: true
-            scaling_amplitude: 0.2
-            perspective_amplitude_x: 0.2
-            perspective_amplitude_y: 0.2
-            patch_ratio: 0.85
-            max_angle: 1.57
-            allow_artifacts: true # true
-        valid_border_margin: 3
 
 front_end_model: 'Train_model_frontend_cubemap'  # 'Train_model_frontend'
 
@@ -67,6 +19,7 @@ model:
     batch_size:  1 # 64
     eval_batch_size: 1
     learning_rate: 0.001
+
     kernel_reg: 0.
     detection_threshold: 0.001 # 1/65
     nms: 4
@@ -97,5 +50,5 @@ validation_size: 10
 train_show_interval: 1000 # one show of the current training from to Tensorboard every N training steps
 seed: 0
 
-# pretrained: 'logs/magicpoint_synth_t2/checkpoints/superPointNet_100000_checkpoint.pth.tar'
-pretrained: 'logs/RD_22000/checkpoints/RD_230331_064848_epo22000_checkpoint.pth.tar'
+pretrained: 'logs/magicpoint_synth_t2/checkpoints/3channel.pth.tar'
+# pretrained: 'logs/RD_22000/checkpoints/RD_230331_064848_epo22000_checkpoint.pth.tar'
