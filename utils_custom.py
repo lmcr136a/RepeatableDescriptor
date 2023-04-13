@@ -167,9 +167,7 @@ def get_matches(kpts2d, kpts3d, kpts2d_w, kpts3d_w, kpts_output,
     #     kpts_output = [kpts_output]
     #     kpts_output_w = [kpts_output_w]
     # homo_batch = len(kpts_output)
-    dbs= kpts2d.to(device)
-    dbs_w= kpts2d_w.to(device)
-    dbslist, dbslist_w = (dbs*0.5).int().float().detach().cpu().tolist(), (dbs_w*0.5).int().float().detach().cpu().tolist()
+    dbslist, dbslist_w = kpts2d, kpts2d_w
 
     # matched_kpts_idx, matched_kpts_idx_w = [], []
     # for homo_iter in range(homo_batch):

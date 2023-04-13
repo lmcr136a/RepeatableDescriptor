@@ -121,8 +121,8 @@ class CubemapDataset(data.Dataset):
             image, warped_image = np.array(image), np.array(warped_image)
 
         T, T_w, R, R_w = np.array(T), np.array(T_w),np.array(R),np.array(R_w)
-        max_kpts_num = 2650 # max kpts number
-        k2Darray, k3Darray, k2Darray_w, k3Darray_w = np.zeros((max_kpts_num, 2)), np.zeros((max_kpts_num, 3)), np.zeros((max_kpts_num, 2)), np.zeros((max_kpts_num, 3))
+        max_kpts_num = 8000 # max kpts number
+        k2Darray, k3Darray, k2Darray_w, k3Darray_w = np.ones((max_kpts_num, 2))*-1, np.ones((max_kpts_num, 3))*-1, np.ones((max_kpts_num, 2))*-1, np.ones((max_kpts_num, 3))*-1
         k2Darray[:len(kpts2D)] = kpts2D
         k3Darray[:len(kpts3D)] = kpts3D
         k2Darray_w[:len(kpts2D_w)] = kpts2D_w
@@ -132,6 +132,7 @@ class CubemapDataset(data.Dataset):
                   'img_path': sample['image'], 'img_path_w': sample['warped_image'],
                   'kpts2D': k2Darray, 'kpts3D': k3Darray, 'kpts2D_w': k2Darray_w, 'kpts3D_w': k3Darray_w, 
                   }
+        
         return sample
 
     def __len__(self):

@@ -151,6 +151,7 @@ def getLabels(img_shape, labels_1D, cell_size=8, device="cpu"):
     """
     labels_2D: N * 2, N: kpt num
     """
+    labels_1D = torch.Tensor(labels_1D).to(device)
     labels_2D = torch.zeros(img_shape[0], 1, img_shape[1], img_shape[2]).to(device)
     labels_2D[:, :,  labels_1D[:,0].int(), labels_1D[:,1].int()] = 1
     labels3D_flattened = labels2Dto3D_flattened(

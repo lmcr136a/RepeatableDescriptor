@@ -296,6 +296,17 @@ class Train_model_frontend_cubemap(object):
         loss = (loss * mask_3D_flattened).sum()
         loss = loss / (mask_3D_flattened.sum() + 1e-10)
         return loss
+    
+    def get_db_kpts(self, sample):
+        dbk2d, dbk2d_w, dbk3d, dbk3d_w = [], [], [], []        # array인데 max kpt num=8000으로 길이 고정
+        for B in self.batch_size:
+            idx = np.where(sample['kpts2D'][B][:,1]+sample['kpts2D'][B][:,0] != 0)[0]
+            dbk2d.append(sample['kpts2D'][B][idx].tolist())
+            dbk3d.append(sample['kpts3D'][B][idx].tolist())
+            idx2 = np.where(sample['kpts2D_w'][B][:,1]+sample['kpts2D_w'][B][:,0] != 0)[0]
+            dbk2d_w.append(sample['kpts2D_w'][B][idx2].tolist())
+            dbk3d_w.append(sample['kpts3D_w'][B][idx2].tolist())
+        return dbk2d, dbk2d_w, dbk3d, dbk3d_w
 
     def train_val_sample(self, sample, n_iter=0, train=False):
         img, img_w = sample['image'].to(self.device), sample['warped_image'].to(self.device)
@@ -303,8 +314,9 @@ class Train_model_frontend_cubemap(object):
         self.batch_size = batch_size
         self.optimizer.zero_grad()
 
+        dbk2d, dbk2d_w, dbk3d, dbk3d_w = self.get_db_kpts(sample)
         B = 0
-        dbk2d, dbk2d_w, dbk3d, dbk3d_w = sample['kpts2D'][B],sample['kpts2D_w'][B],sample['kpts3D'][B],sample['kpts3D_w'][B]        
+        
         self.thd = 0.05
         for h in tqdm(range(0, self.homo_num, self.homo_batch), desc=f'{self.homo_num} Homography'):
             
