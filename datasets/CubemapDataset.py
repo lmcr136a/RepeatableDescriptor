@@ -47,7 +47,10 @@ class CubemapDataset(data.Dataset):
             self.sizer = 'No resize'
 
         self.RTfile = io.loadmat(os.path.join(self.custom_dir, 'RTDB.mat'))
-        self.Kptfile = io.loadmat(os.path.join(self.custom_dir, 'KeyPts2D3D_1024_H_thd0.25_cnt2.mat'))
+        try:
+            self.Kptfile = io.loadmat(os.path.join(self.custom_dir, 'KeyPts2D3D_1024_H_thd0.2_cnt2_230417'))
+        except:
+            print("\n--\nNO Pts DB\n--\n")
         pass
 
     def __getitem__(self, index):
@@ -101,8 +104,6 @@ class CubemapDataset(data.Dataset):
             raise
         T, T_w = self.RTfile['T_unit5'][idx], self.RTfile['T_unit5'][idx_w]
         R, R_w = self.RTfile['R_unit5'][idx], self.RTfile['R_unit5'][idx_w]
-        kpts2D, kpts3D = self.Kptfile[self.custom_dir+'/'+name+'2Dkpts'], self.Kptfile[self.custom_dir+'/'+name+'_3Dkpts']
-        kpts2D_w, kpts3D_w = self.Kptfile[self.custom_dir+'/'+name_w+'2Dkpts'], self.Kptfile[self.custom_dir+'/'+name_w+'_3Dkpts']
         if 0:
             # setupnums = list(map(lambda x: x.split('setup')[-1].split('/')[0][1:], sample['image']))
             # ply_path = list(map(lambda x: os.path.join(self.custom_dir, 'ply', 'FF230120_Setup{x}.ply'), setupnums))
@@ -123,6 +124,8 @@ class CubemapDataset(data.Dataset):
         T, T_w, R, R_w = np.array(T), np.array(T_w),np.array(R),np.array(R_w)
         try:
             max_kpts_num = 8000 # max kpts number
+            kpts2D, kpts3D = self.Kptfile[self.custom_dir+'/'+name+'2Dkpts'], self.Kptfile[self.custom_dir+'/'+name+'_3Dkpts']
+            kpts2D_w, kpts3D_w = self.Kptfile[self.custom_dir+'/'+name_w+'2Dkpts'], self.Kptfile[self.custom_dir+'/'+name_w+'_3Dkpts']
             k2Darray, k3Darray, k2Darray_w, k3Darray_w = np.ones((max_kpts_num, 2))*-1, np.ones((max_kpts_num, 3))*-1, np.ones((max_kpts_num, 2))*-1, np.ones((max_kpts_num, 3))*-1
             k2Darray[:len(kpts2D)] = kpts2D
             k3Darray[:len(kpts3D)] = kpts3D

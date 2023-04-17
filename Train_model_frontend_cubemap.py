@@ -63,10 +63,10 @@ class Train_model_frontend_cubemap(object):
             dense_loss, sparse_loss (default)
         """
         # config
-        print("Load Train_model_frontend!!")
+        # print("Load Train_model_frontend!!")
         self.config = self.default_config
         self.config = dict_update(self.config, config)
-        print("check config!!", self.config)
+        # print("check config!!", self.config)
 
         # init parameters
         self.device = device
@@ -299,7 +299,7 @@ class Train_model_frontend_cubemap(object):
     
     def get_db_kpts(self, sample):
         dbk2d, dbk2d_w, dbk3d, dbk3d_w = [], [], [], []        # array인데 max kpt num=8000으로 길이 고정
-        for B in self.batch_size:
+        for B in range(self.batch_size):
             idx = np.where(sample['kpts2D'][B][:,1]+sample['kpts2D'][B][:,0] != 0)[0]
             dbk2d.append(sample['kpts2D'][B][idx].tolist())
             dbk3d.append(sample['kpts3D'][B][idx].tolist())
@@ -316,6 +316,7 @@ class Train_model_frontend_cubemap(object):
 
         dbk2d, dbk2d_w, dbk3d, dbk3d_w = self.get_db_kpts(sample)
         B = 0
+        dbk2d, dbk2d_w, dbk3d, dbk3d_w = dbk2d[0], dbk2d_w[0], dbk3d[0], dbk3d_w[0]
         
         self.thd = 0.05
         for h in tqdm(range(0, self.homo_num, self.homo_batch), desc=f'{self.homo_num} Homography'):
@@ -382,6 +383,9 @@ class Train_model_frontend_cubemap(object):
                 hm_w = apply_H_from_info(hms_w[bh], Hinv_infos_w[bh])
                 hm_w = thd_img(hm_w, thd=self.thd)
                 kpts_w = get_kpts_from_hm(hm_w, mask2D_w)
+
+                torch.save(img[B], 'img.pt')
+                torch.save(img_w[B], 'img_w.pt')
 
                 matched_kpts_idx, matched_kpts_idx_w = get_matches(
                     dbk2d, dbk3d, dbk2d_w, dbk3d_w,
@@ -461,6 +465,7 @@ class Train_model_frontend_cubemap(object):
         
         ax[0].imshow(im1)
         i = 0
+        print(np.array(kpts1).shape)
         for x, y in kpts1:
             ax[0].add_patch(plt.Circle((x, y), R, color='r'))
             # ax[0].text(x, y, str(i))

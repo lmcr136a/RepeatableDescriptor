@@ -57,7 +57,7 @@ torch.backends.cudnn.benchmark = False
 np.random.seed(seed)
 random.seed(seed)
 
-fnc = 1023.5
+fnc = 512
 args = Namespace(command='train_joint', config='configs/magicpoint_cubemap.yaml', debug=False, eval=False, exper_name='cubemap_dataset', func=train_joint)
 
 
@@ -168,14 +168,15 @@ RTfile = {}
 HOMO_NUM, HOMO_BATCH = 100, 20
 thd = 0.2
 
-DBNAME = f'KeyPts2D3D_1024_H_thd{thd}_cnt2_230411.mat'
+DBNAME = f'KeyPts2D3D_1024_H{HOMO_NUM}_thd{thd}_230417.mat'
 processed_img_names = []
-RTfile = io.loadmat(DBNAME)
-# io.savemat(DBNAME, RTfile)
+# RTfile = io.loadmat(DBNAME)
+io.savemat(DBNAME, RTfile)
+pathlist = list(RTfile.keys())
 for _iter, sample in enumerate(train_loader):
     b=0
     ipath = sample['img_path'][b]
-    if ipath+'2Dkpts' not in list(RTfile.keys()):
+    if ipath+'2Dkpts' not in pathlist:
         img = sample['image'].to(device)
         batch_size = img.shape[0]
         kpts2d_total = []
@@ -201,8 +202,30 @@ for _iter, sample in enumerate(train_loader):
                     hm = apply_H_from_info(hms[hb], Hinv_infos[hb])
                     hm = thd_img(hm, thd=thd)
                     kpts = get_kpts_from_hm(hm)
-                    coor3D = take3Dpoint(ptcloud_list[b], torch.Tensor(kpts).to(device), sample['R'][b].to(device).float(), 
-                                sample['T'][b].to(device), camera_matrix, device)
+                    try:
+                        coor3D = take3Dpoint(ptcloud_list[b], torch.Tensor(kpts).to(device), sample['R'][b].to(device).float(), 
+                                    sample['T'][b].to(device), camera_matrix, device)
+                    except:
+                        hm = apply_H_from_info(hms[hb], Hinv_infos[hb])
+                        hm = thd_img(hm, thd=0.08)
+                        kpts = get_kpts_from_hm(hm)
+                        coor3D = take3Dpoint(ptcloud_list[b], torch.Tensor(kpts).to(device), sample['R'][b].to(device).float(), 
+                                    sample['T'][b].to(device), camera_matrix, device)
+                        if 0:
+                            torch.save(hm, 'hm.pt')
+                            torch.save(hms, 'hms.pt')
+                            torch.save(im_trf_cat[b], 'im_trf_cat.pt')
+                            torch.save(img, 'img.pt')
+                            torch.save(Hinv_infos, 'hinvinfos.pt')
+                            
+                            print(  f"\n{hb}\n{ptcloud_list[b].shape}\n" 
+                                    +f"{torch.Tensor(kpts).to(device).shape}\n" 
+                                    +f"{sample['R'][b].to(device).float().shape}\n"
+                                    +f"{sample['T'][b].to(device).shape}\n" 
+                                    +f"{camera_matrix, device}\n\n"
+                                    +f"{ipath}\n"
+                                    +f"{hms.shape}, {hm.shape}\n\n")
+                            raise
                     kpts2d_total.append(kpts)
                     kpts3d_total.append(coor3D)
 
@@ -235,7 +258,7 @@ for _iter, sample in enumerate(train_loader):
     m = (runt - h*3600)//60
     s = round(runt - h*3600 - m*60)
     print(f"iter {_iter+1} in {len(train_loader)}, \
-        {round((_iter+1)/len(train_loader), 4) * 100}%\
+        {round((_iter+1)/len(train_loader)*100, 2)}%\
             {h}h {m}m {s}s\
             ")
 
