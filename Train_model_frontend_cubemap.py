@@ -390,6 +390,9 @@ class Train_model_frontend_cubemap(object):
                 hm_w = thd_img(hm_w, thd=self.thd)
                 kpts_w = get_kpts_from_hm(hm_w, mask2D_w)
 
+                torch.save(img[B], 'img.pt')
+                torch.save(img_w[B], 'img_w.pt')
+
                 matched_kpts_idx, matched_kpts_idx_w = get_matches(
                     dbk2d, dbk3d, dbk2d_w, dbk3d_w,
                     kpts, kpts_w,

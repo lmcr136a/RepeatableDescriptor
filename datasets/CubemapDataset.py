@@ -142,7 +142,7 @@ class CubemapDataset(data.Dataset):
             print(f"img: {name}\n warped_img: {name_w}")
             print(f"kpts2D: {len(kpts2D)}\n kpts2D_w: {kpts2D_w}")
             newidx = random.randint(0, len(self.files['image_paths']))
-            print("Get item from alternative index: {newidx}")
+            print(f"Get item from alternative index: {newidx}")
             sample = self.__getitem__(newidx)
 
         return sample

@@ -209,12 +209,15 @@ for _iter, sample in enumerate(train_loader):
                         hm = apply_H_from_info(hms[hb], Hinv_infos[hb])
                         hm = thd_img(hm, thd=0.08)
                         kpts = get_kpts_from_hm(hm)
+<<<<<<< HEAD
                         print(kpts)
                         if len(kpts) < 1:
                             hm = thd_img(hm, thd=0.02)
                             kpts = get_kpts_from_hm(hm)
                             if len(kpts) < 1:
                                 continue
+=======
+>>>>>>> 8fd4a70356835655f2930335e75a21ed0410bf9b
                         coor3D = take3Dpoint(ptcloud_list[b], torch.Tensor(kpts).to(device), sample['R'][b].to(device).float(), 
                                     sample['T'][b].to(device), camera_matrix, device)
                         if 0:
