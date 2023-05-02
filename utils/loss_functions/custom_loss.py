@@ -27,9 +27,10 @@ def descriptor_loss_custom(desc, desc_w, kpts, matched_kpts_idx, kpts_w, matched
     D = get_desc_of_kpts(desc, kpts, matched_kpts_idx)
     D_w = get_desc_of_kpts(desc_w, kpts_w, matched_kpts_idx_w)
 
-    DtD = D.T@D_w
-    Ds = torch.diag(torch.diagonal(DtD))
-    loss_desc = (torch.sum(DtD)-2*torch.sum(Ds))/n
+    # DtD = D.T@D_w
+    # Ds = torch.diag(torch.diagonal(DtD))
+    # loss_desc = (torch.sum(DtD)-2*torch.sum(Ds))/n
+    loss_desc = torch.sum(torch.pow(D - D_w, 2))
     return loss_desc
 
 # def descriptor_loss_custom_batch(desc, desc_w, kpts, matched_kpts_idx, kpts_w, matched_kpts_idx_w, device):
@@ -151,6 +152,7 @@ def getLabels(img_shape, labels_1D, cell_size=8, device="cpu"):
     """
     labels_2D: N * 2, N: kpt num
     """
+    labels_1D = torch.Tensor(labels_1D).to(device)
     labels_2D = torch.zeros(img_shape[0], 1, img_shape[1], img_shape[2]).to(device)
     labels_2D[:, :,  labels_1D[:,0].int(), labels_1D[:,1].int()] = 1
     labels3D_flattened = labels2Dto3D_flattened(

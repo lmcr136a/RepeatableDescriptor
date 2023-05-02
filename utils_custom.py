@@ -159,17 +159,19 @@ def pt_in_list(pt, dblist):
 
 
 def get_matches(kpts2d, kpts3d, kpts2d_w, kpts3d_w, kpts_output, 
-                kpts_output_w, device, thd=0.05):
-    # kpts2d:       N * 2
-    # kpts3d:       N * 3
-    # kpts_output:  homo_batch * N_pred * 2 ,  list type!
+                kpts_output_w, device, pxthd=2, ptcld_thd=0.05):
+    """
+    kpts are all list types.
+    kpts2d:       N * 2
+    kpts3d:       N * 3
+    kpts_output:  homo_batch * N_pred * 2
+    """
     # if len(np.array(kpts_output).shape) == 2:
     #     kpts_output = [kpts_output]
     #     kpts_output_w = [kpts_output_w]
     # homo_batch = len(kpts_output)
-    dbs= kpts2d.to(device)
-    dbs_w= kpts2d_w.to(device)
-    dbslist, dbslist_w = (dbs*0.5).int().float().detach().cpu().tolist(), (dbs_w*0.5).int().float().detach().cpu().tolist()
+    dbslist, dbslist_w = np.array(kpts2d), np.array(kpts2d_w)
+    kpts_output, kpts_output_w = np.array(kpts_output), np.array(kpts_output_w)
 
     # matched_kpts_idx, matched_kpts_idx_w = [], []
     # for homo_iter in range(homo_batch):
@@ -177,31 +179,58 @@ def get_matches(kpts2d, kpts3d, kpts2d_w, kpts3d_w, kpts_output,
     output_3Dcoor = []
     # for i, pt in enumerate(kpts_output[homo_iter]):
     for i, pt in enumerate(kpts_output):
-        pt = pt_in_list(pt=pt, dblist=dbslist)
-        if pt:
-            output_kpts_idx.append(i)            # output_kpts_idx: [2, 3, 5, 6, 7, 9, ...] db에 있는 kpt 인덱스
-            output_3Dcoor.append(kpts3d[dbslist.index(pt)])   # [2번의3D좌표, 3번의 3D좌표, 5번의 3D좌표, ...]
+        # pt = pt_in_list(pt=pt, dblist=dbslist)\
+        dis = np.sqrt(np.sum(np.power(dbslist-pt, 2), axis=1))
+        v = np.min(dis)
+        idx = np.argmin(dis)
+        if v <= pxthd:
+            output_kpts_idx.append(i)            # output_kpts_idx: [2, 3, 5, 6, 7, 9, ...] db에 있는 kpt output 인덱스
+            output_3Dcoor.append(kpts3d[idx])   # [2번의3D좌표, 3번의 3D좌표, 5번의 3D좌표, ...]
 
     output_kpts_idx_w = []
     output_3Dcoor_w = []
     # for i, pt_w in enumerate(kpts_output_w[homo_iter]):
     for i, pt_w in enumerate(kpts_output_w):
-        pt_w = pt_in_list(pt=pt_w, dblist=dbslist_w)
-        if pt_w:
-            output_kpts_idx_w.append(i)
-            output_3Dcoor_w.append(kpts3d_w[dbslist_w.index(pt_w)])
-
+        dis = np.sqrt(np.sum(np.power(dbslist_w-pt_w, 2), axis=1))
+        v = np.min(dis)
+        idx = np.argmin(dis)
+        if v <= pxthd:
+            output_kpts_idx_w.append(i)            # output_kpts_idx: [2, 3, 5, 6, 7, 9, ...] db에 있는 kpt output 인덱스
+            output_3Dcoor_w.append(kpts3d_w[idx])   # [2번의3D좌표, 3번의 3D좌표, 5번의 3D좌표, ...]
     matched_idx, matched_idx_w = [], []
+
+
+    output_3Dcoor_w = np.array(output_3Dcoor_w)
+    output_3Dcoor = np.array(output_3Dcoor)
+
+    # torch.save(output_3Dcoor, 'output_3Dcoor.pt')
+    # torch.save(output_3Dcoor_w, 'output_3Dcoor_w.pt')
+    # torch.save(output_kpts_idx_w, 'output_kpts_idx_w.pt')
+    # torch.save(output_kpts_idx, 'output_kpts_idx.pt')
+
+    # torch.save(kpts_output_w, 'kpts_output_w.pt')
+    # torch.save(kpts_output, 'kpts_output.pt')
+    # torch.save(kpts2d, 'kpts2d.pt')
+    # torch.save(kpts3d, 'kpts3d.pt')
+    # torch.save(kpts2d_w, 'kpts2d_w.pt')
+    # torch.save(kpts3d_w, 'kpts3d_w.pt')
+    
+    if len(output_3Dcoor)==0 or len(output_3Dcoor_w) ==0:
+        return [], []
+    
     for i1, k1 in enumerate(output_3Dcoor):
-        for i2, k2 in enumerate(output_3Dcoor_w):
-            if torch.sum(torch.abs(k1-k2)) < thd:
-                matched_idx.append(i1)
-                matched_idx_w.append(i2)
+        dis = np.sqrt(np.sum(np.power(output_3Dcoor_w - k1, 2), axis=1))
+        v = np.min(dis)
+        idx = np.argmin(dis)
+        if v <= ptcld_thd:
+            matched_idx.append(i1)
+            matched_idx_w.append(idx)
     # matched_kpts_idx.append(torch.Tensor(output_kpts_idx)[matched_idx].tolist())
     # matched_kpts_idx_w.append(torch.Tensor(output_kpts_idx_w)[matched_idx_w].tolist())
     matched_kpts_idx = torch.Tensor(output_kpts_idx)[matched_idx].tolist()
     matched_kpts_idx_w = torch.Tensor(output_kpts_idx_w)[matched_idx_w].tolist()
     return matched_kpts_idx, matched_kpts_idx_w
+
 
 def get_dup_kpts(kpts, kpts3d, cnt_thd=1):
     # at least twice dup pts of kpts2d and corresponding 3dkpts

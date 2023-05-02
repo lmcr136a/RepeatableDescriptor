@@ -144,7 +144,7 @@ def save_checkpoint(save_path, net_state, epoch, filename='checkpoint.pth.tar'):
     save_path = os.path.join(save_path, 'checkpoints')
     os.makedirs(save_path, exist_ok=True)
 
-    filename = 'RD_{}_epo{}_{}'.format(get_timeinfo(), str(epoch), filename)
+    filename = 'RD_{}_iter{}_{}'.format(get_timeinfo(), str(epoch), filename)
     torch.save(net_state, os.path.join(save_path, filename))
     print("\nSaved checkpoint to ", filename)
     pass

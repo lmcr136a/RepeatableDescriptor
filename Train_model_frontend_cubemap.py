@@ -13,6 +13,7 @@ import torch.utils.data
 import matplotlib.pyplot as plt
 import numpy as np
 import torch.nn as nn
+import torch.optim as optim
 from tqdm import tqdm
 from PIL import Image
 from pathlib import Path
@@ -24,7 +25,7 @@ from utils.utils import save_checkpoint, get_log_dir
 from utils_custom import *
 from utils_custom_visualize import *
 from utils.loss_functions.custom_loss import descriptor_loss_custom, \
-    detection_loss_custom, getLabels, getMasks
+    detection_loss_custom, getLabels, getMasks, get_desc_of_kpts
 
 def thd_img(img, thd=0.015):
     """
@@ -63,10 +64,10 @@ class Train_model_frontend_cubemap(object):
             dense_loss, sparse_loss (default)
         """
         # config
-        print("Load Train_model_frontend!!")
+        # print("Load Train_model_frontend!!")
         self.config = self.default_config
         self.config = dict_update(self.config, config)
-        print("check config!!", self.config)
+        # print("check config!!", self.config)
 
         # init parameters
         self.device = device
@@ -77,10 +78,11 @@ class Train_model_frontend_cubemap(object):
         self.subpixel = False
         self.loss = 0
         self.train_only_descriptor = config["model"].get('train_only_descriptor', False)
-        self.homo_num, self.homo_batch = 100,2
+        self.homo_num, self.homo_batch = 100,1
         print('HOMONUM:', self.homo_num, "  HOMOBATCH:", self.homo_batch)
         self.max_iter = config["train_iter"]
         self.start = time.time()
+        self.before = self.start
 
         if self.config["model"]["sparse_loss"]["enable"]:
             print("use sparse_loss!")
@@ -110,22 +112,8 @@ class Train_model_frontend_cubemap(object):
     def dataParallel(self):
         print("=== Let's use", torch.cuda.device_count(), "GPUs!")
         self.net = self.net
-        self.optimizer = self.adamOptim(
-            self.net, lr=self.config["model"]["learning_rate"]
-        )
-        pass
+        self.optimizer = optim.Adam(self.net.parameters(), lr=self.config["model"]["learning_rate"], betas=(0.9, 0.999))
 
-    def adamOptim(self, net, lr):
-        """
-        initiate adam optimizer
-        :param net: network structure
-        :param lr: learning rate
-        """
-        print("adam optimizer")
-        import torch.optim as optim
-
-        optimizer = optim.Adam(net.parameters(), lr=lr, betas=(0.9, 0.999))
-        return optimizer
 
     def loadModel(self):
         """
@@ -137,7 +125,7 @@ class Train_model_frontend_cubemap(object):
         print("model: ", model)
         net = modelLoader(model=model, **params).to(self.device)
         logging.info("=> setting adam solver")
-        optimizer = self.adamOptim(net, lr=self.config["model"]["learning_rate"])
+        optimizer = optim.Adam(net.parameters(), lr=self.config["model"]["learning_rate"])
 
         n_iter = 0
         ## new model or load pretrained
@@ -164,13 +152,27 @@ class Train_model_frontend_cubemap(object):
             for child in self.net.children():
                 for param in child.parameters():
                     param.requires_grad = False
+
             self.net.convDa.weight.requires_grad = True
             self.net.bnDa.weight.requires_grad = True
             self.net.convDb.weight.requires_grad = True
             self.net.bnDb.weight.requires_grad = True
+            self.net.convDa.bias.requires_grad = True
+            self.net.bnDa.bias.requires_grad = True
+            self.net.convDb.bias.requires_grad = True
+            self.net.bnDb.bias.requires_grad = True
+            nn.init.normal_(self.net.convDa.weight)
+            nn.init.normal_(self.net.bnDa.weight)
+            nn.init.normal_(self.net.convDb.weight)
+            nn.init.normal_(self.net.bnDb.weight)
+            nn.init.normal_(self.net.convDa.bias)
+            nn.init.normal_(self.net.bnDa.bias)
+            nn.init.normal_(self.net.convDb.bias)
+            nn.init.normal_(self.net.bnDb.bias)
             print("\n\n Train only descriptor")
 
         self.optimizer = optimizer
+        # self.n_iter = 2000
         self.n_iter = setIter(n_iter)
         pass
 
@@ -214,13 +216,17 @@ class Train_model_frontend_cubemap(object):
             epoch += 1
             self.visualize = True
             #####################3
-            print_interval = 100
+            print_interval = self.config["print_interval"]
+            save_interval = self.config["save_interval"]
             loss_batch = []  # To compute average loss of certain batch, batch == print interval
 
             for i, sample_train in enumerate(self.train_loader):
                 loss_out = self.train_val_sample(sample_train, self.n_iter, True)
                 self.n_iter += 1
-                loss_batch.append(loss_out)
+                if type(loss_out) == int:
+                    loss_batch.append(loss_out)
+                else:
+                    loss_batch.append(loss_out.detach().cpu())
                 
                 if self._eval and self.n_iter % self.config["validation_interval"] == 0:
                     logging.info("====== Validating...")
@@ -229,16 +235,18 @@ class Train_model_frontend_cubemap(object):
                         if j > self.config.get("validation_size", 3):
                             break
 
-                if self.n_iter % print_interval == 0:
+                if self.n_iter > print_interval:
                     self.before, iterlog = measure_t(
                         self.start, self.before, i_now=self.n_iter, i_total=self.max_iter, 
                         others=f"loss: {np.mean(loss_batch)}", get_str=True)
                     loss_batch = []
                     self.write_log(iterlog)
                     self.figname = 0
+                    print_interval += self.config["print_interval"]
 
-                if self.n_iter % self.config["save_interval"] == 0:
+                if self.n_iter > save_interval:
                     self.saveModel()
+                    save_interval += self.config["save_interval"]
 
                 if self.n_iter > self.max_iter:
                     logging.info("End training: %d", self.n_iter)
@@ -296,6 +304,17 @@ class Train_model_frontend_cubemap(object):
         loss = (loss * mask_3D_flattened).sum()
         loss = loss / (mask_3D_flattened.sum() + 1e-10)
         return loss
+    
+    def get_db_kpts(self, sample):
+        dbk2d, dbk2d_w, dbk3d, dbk3d_w = [], [], [], []        # array인데 max kpt num=8000으로 길이 고정
+        for B in range(self.batch_size):
+            idx = np.where(sample['kpts2D'][B][:,1]+sample['kpts2D'][B][:,0] != 0)[0]
+            dbk2d.append(sample['kpts2D'][B][idx].tolist())
+            dbk3d.append(sample['kpts3D'][B][idx].tolist())
+            idx2 = np.where(sample['kpts2D_w'][B][:,1]+sample['kpts2D_w'][B][:,0] != 0)[0]
+            dbk2d_w.append(sample['kpts2D_w'][B][idx2].tolist())
+            dbk3d_w.append(sample['kpts3D_w'][B][idx2].tolist())
+        return dbk2d, dbk2d_w, dbk3d, dbk3d_w
 
     def train_val_sample(self, sample, n_iter=0, train=False):
         img, img_w = sample['image'].to(self.device), sample['warped_image'].to(self.device)
@@ -303,10 +322,12 @@ class Train_model_frontend_cubemap(object):
         self.batch_size = batch_size
         self.optimizer.zero_grad()
 
+        dbk2d, dbk2d_w, dbk3d, dbk3d_w = self.get_db_kpts(sample)
         B = 0
-        dbk2d, dbk2d_w, dbk3d, dbk3d_w = sample['kpts2D'][B],sample['kpts2D_w'][B],sample['kpts3D'][B],sample['kpts3D_w'][B]        
+        dbk2d, dbk2d_w, dbk3d, dbk3d_w = dbk2d[0], dbk2d_w[0], dbk3d[0], dbk3d_w[0]
+        
         self.thd = 0.05
-        for h in tqdm(range(0, self.homo_num, self.homo_batch), desc=f'{self.homo_num} Homography'):
+        for h in tqdm(range(0, self.homo_num, self.homo_batch), desc=f'{n_iter}) {self.homo_num} Homography'):
             
             loss = 0
             Hidx1, Hidx2 = get_Hidx(h, self.homo_batch, self.homo_num)
@@ -343,8 +364,6 @@ class Train_model_frontend_cubemap(object):
             labels3D_in_loss_w = getLabels(imgshape, dbk2d, device=self.device)
 
             for bh in range(H_NUM_THIS):  # 여기서부터 하나의 이미지만 취급, 배치 없음
-                self.n_iter += 1  ##########
-
                 # H 없을때
                 # hms = thd_img(flattenDetection(semi), thd=self.thd)
                 # hms_w = thd_img(flattenDetection(semi_w), thd=self.thd)
@@ -376,6 +395,8 @@ class Train_model_frontend_cubemap(object):
                     kpts, kpts_w,
                     device=self.device,
                 )
+                if len(matched_kpts_idx) == 0:
+                    continue
                 # desc: [3, 256, 1024, 1024]   kpts: [N, 2]    matched_kpts_idx: [0]
                 loss_desc = self.descriptor_loss(
                     desc[bh],
@@ -384,26 +405,39 @@ class Train_model_frontend_cubemap(object):
                     kpts_w, matched_kpts_idx_w
                 )
                 gamma = 0.2
-                print('----', np.array(matched_kpts_idx).shape, ' matched kpts')
-                print(gamma*loss_desc.data ,loss_det.data ,loss_det_w.data)
+                # print('----', np.array(matched_kpts_idx).shape, ' matched kpts')
+                # print(gamma*loss_desc.data ,loss_det.data ,loss_det_w.data)
                 loss += gamma*loss_desc + loss_det + loss_det_w
 
                 if bh == 0:
-                    if self.figname < 10:
-                        self.visualize_kpts(img, img_w, dbk2d, dbk2d_w, name='db', n=3000)
+                    if self.figname < 5:
+                        # self.visualize_kpts(img, img_w, dbk2d, dbk2d_w, name='db', n=3000)
                         kpts, kpts_w = torch.Tensor(kpts), torch.Tensor(kpts_w)
                         matched_kpts_idx, matched_kpts_idx_w = torch.Tensor(matched_kpts_idx), torch.Tensor(matched_kpts_idx_w)
                         maching_plot(img, img_w, kpts, kpts_w, 
                             kpts[matched_kpts_idx.int()], kpts_w[matched_kpts_idx_w.int()], 
-                            path=os.path.join(self.save_path, f'figures/iter{self.n_iter}_{self.figname}.png'))
+                            path=os.path.join(self.save_path, f'figures/iter{self.n_iter}_{self.figname}_training_this.png'))
+                        
+                        kpts_desc = get_desc_of_kpts(desc[bh], kpts)
+                        kpts_desc_w = get_desc_of_kpts(desc_w[bh], kpts_w)
+                        kpts_desc = kpts_desc.transpose(0, 1).detach().cpu()
+                        kpts_desc_w = kpts_desc_w.transpose(0, 1).detach().cpu()
+                        kpts_sorted, kpts_w_sorted, color = sort_by_similar_pts(kpts, kpts_w, kpts_desc, kpts_desc_w)
+                        
+                        maching_plot(img, img_w, kpts, kpts_w, 
+                            kpts_sorted.detach().cpu(), kpts_w_sorted.detach().cpu(), color,
+                            path=os.path.join(self.save_path, f'figures/iter{self.n_iter}_{self.figname}_predicted_this.png'))
+                        
+
+
                         self.visualize = False
                         self.figname += 1
             self.loss = loss
-            if train:
+            if train and loss > 0:
                 loss.backward()
                 self.optimizer.step()
 
-        return loss.item()
+        return loss
 
     def saveModel(self):
         """
@@ -449,6 +483,7 @@ class Train_model_frontend_cubemap(object):
         
         ax[0].imshow(im1)
         i = 0
+        print(np.array(kpts1).shape)
         for x, y in kpts1:
             ax[0].add_patch(plt.Circle((x, y), R, color='r'))
             # ax[0].text(x, y, str(i))

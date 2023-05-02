@@ -57,7 +57,7 @@ torch.backends.cudnn.benchmark = False
 np.random.seed(seed)
 random.seed(seed)
 
-fnc = 1023.5
+fnc = 512
 args = Namespace(command='train_joint', config='configs/magicpoint_cubemap.yaml', debug=False, eval=False, exper_name='cubemap_dataset', func=train_joint)
 
 
@@ -168,58 +168,84 @@ RTfile = {}
 HOMO_NUM, HOMO_BATCH = 100, 20
 thd = 0.2
 
-DBNAME = f'KeyPts2D3D_1024_H_thd{thd}_cnt2_230411.mat'
-# DBNAME2 = f'KeyPts2D3D_1024_H_thd{thd}_cnt3.mat'
+DBNAME = f'KeyPts2D3D_1024_H{HOMO_NUM}_thd{thd}_230417.mat'
 processed_img_names = []
+# RTfile = io.loadmat(DBNAME)
 io.savemat(DBNAME, RTfile)
-# io.savemat(DBNAME2, RTfile)
+pathlist = list(RTfile.keys())
 for _iter, sample in enumerate(train_loader):
-    img = sample['image'].to(device)
-    batch_size = img.shape[0]
-    kpts2d_total = []
-    kpts3d_total = []
-
     b=0
-    ptcloud_list = []
-    # for b in range(batch_size):   # usually batch_size = 1
-    target = o3d.io.read_point_cloud(sample['ply_path'][b])
-    points = torch.Tensor(np.array(target.points)).to(device)
-    del target
-    ptcloud_list.append(points)
+    ipath = sample['img_path'][b]
+    if ipath+'2Dkpts' not in pathlist:
+        img = sample['image'].to(device)
+        batch_size = img.shape[0]
+        kpts2d_total = []
+        kpts3d_total = []
 
-    with torch.inference_mode():
-        for h in range(0, HOMO_NUM, HOMO_BATCH):
-            Hidx1, Hidx2 = get_Hidx(h, HOMO_BATCH, HOMO_NUM)
-            H_NUM_THIS = Hidx2-Hidx1
+        ptcloud_list = []
+        # for b in range(batch_size):   # usually batch_size = 1
+        target = o3d.io.read_point_cloud(sample['ply_path'][b])
+        points = torch.Tensor(np.array(target.points)).to(device)
+        del target
+        ptcloud_list.append(points)
 
-            im_trf_cat, Hinv_infos = get_homo_img_cat(img, H_NUM_THIS)
+        with torch.inference_mode():
+            for h in range(0, HOMO_NUM, HOMO_BATCH):
+                Hidx1, Hidx2 = get_Hidx(h, HOMO_BATCH, HOMO_NUM)
+                H_NUM_THIS = Hidx2-Hidx1
 
-            # for b in range(batch_size): # batch size
-            if sample['img_path'][b] not in processed_img_names:
+                im_trf_cat, Hinv_infos = get_homo_img_cat(img, H_NUM_THIS)
+
                 out = net(im_trf_cat[b])
                 hms = flattenDetection(out['semi'])
                 for hb in range(H_NUM_THIS):
                     hm = apply_H_from_info(hms[hb], Hinv_infos[hb])
                     hm = thd_img(hm, thd=thd)
                     kpts = get_kpts_from_hm(hm)
-                    coor3D = take3Dpoint(ptcloud_list[b], torch.Tensor(kpts).to(device), sample['R'][b].to(device).float(), 
-                                sample['T'][b].to(device), camera_matrix, device)
+                    try:
+                        coor3D = take3Dpoint(ptcloud_list[b], torch.Tensor(kpts).to(device), sample['R'][b].to(device).float(), 
+                                    sample['T'][b].to(device), camera_matrix, device)
+                    except:
+                        hm = apply_H_from_info(hms[hb], Hinv_infos[hb])
+                        hm = thd_img(hm, thd=0.08)
+                        kpts = get_kpts_from_hm(hm)
+                        print(kpts)
+                        if len(kpts) < 1:
+                            hm = thd_img(hm, thd=0.02)
+                            kpts = get_kpts_from_hm(hm)
+                            if len(kpts) < 1:
+                                continue
+                        coor3D = take3Dpoint(ptcloud_list[b], torch.Tensor(kpts).to(device), sample['R'][b].to(device).float(), 
+                                    sample['T'][b].to(device), camera_matrix, device)
+                        if 0:
+                            torch.save(hm, 'hm.pt')
+                            torch.save(hms, 'hms.pt')
+                            torch.save(im_trf_cat[b], 'im_trf_cat.pt')
+                            torch.save(img, 'img.pt')
+                            torch.save(Hinv_infos, 'hinvinfos.pt')
+                            
+                            print(  f"\n{hb}\n{ptcloud_list[b].shape}\n" 
+                                    +f"{torch.Tensor(kpts).to(device).shape}\n" 
+                                    +f"{sample['R'][b].to(device).float().shape}\n"
+                                    +f"{sample['T'][b].to(device).shape}\n" 
+                                    +f"{camera_matrix, device}\n\n"
+                                    +f"{ipath}\n"
+                                    +f"{hms.shape}, {hm.shape}\n\n")
+                            raise
                     kpts2d_total.append(kpts)
                     kpts3d_total.append(coor3D)
 
-        # for b in range(batch_size):
-        ipath = sample['img_path'][b]
+            # for b in range(batch_size):
 
-        # for i in range(0, len(kpts2d_total), 1):
-        #     visualize_kpts(ipath, im_trf_cat[b][i], torch.Tensor(kpts2d_total[i]), [],
-        #                    name=f"iter{_iter}_{i}{i+1}")
-        #     print(i, 'saved')
+            # for i in range(0, len(kpts2d_total), 1):
+            #     visualize_kpts(ipath, im_trf_cat[b][i], torch.Tensor(kpts2d_total[i]), [],
+            #                    name=f"iter{_iter}_{i}{i+1}")
+            #     print(i, 'saved')
 
-        kpts2d_total = [onept for onehomo in kpts2d_total for onept in onehomo ]
-        kpts3d_total = [onept for onehomo in kpts3d_total for onept in onehomo ]
+            kpts2d_total = [onept for onehomo in kpts2d_total for onept in onehomo ]
+            kpts3d_total = [onept for onehomo in kpts3d_total for onept in onehomo ]
 
-        RTfile = io.loadmat(DBNAME)
-        if ipath not in list(RTfile.keys()):
+            RTfile = io.loadmat(DBNAME)
             kpttotal, kpttotal3d = get_dup_kpts(kpts2d_total, 
                                                 np.array(kpts3d_total),
                                                 cnt_thd=2)
@@ -230,25 +256,15 @@ for _iter, sample in enumerate(train_loader):
             RTfile.update({ipath+'_3Dkpts': kpttotal3d})
             RTfile.update({ipath+'2Dkpts': kpttotal})
 
-        io.savemat(DBNAME, RTfile)
-        # RTfile = io.loadmat(DBNAME2)
-        # if ipath not in list(RTfile.keys()):
-        #     kpttotal, kpttotal3d = get_dup_kpts(kpts2d_total[b], 
-        #                                         np.array(kpts3d_total[b]),
-        #                                         cnt_thd=3)
-        #     RTfile.update({ipath+'_3Dkpts': kpttotal3d})
-        #     RTfile.update({ipath+'2Dkpts': kpttotal})
-        
-        # io.savemat(DBNAME2, RTfile)
-        processed_img_names.append(sample['img_path'][b])
-        print(f"{' '*30} {len(kpttotal)} ,, {len(kpttotal3d)}")
+            io.savemat(DBNAME, RTfile)
+            print(f"{' '*30} {len(kpttotal)} ,, {len(kpttotal3d)}")
 
     runt = time.time()-start
     h = runt//3600
     m = (runt - h*3600)//60
     s = round(runt - h*3600 - m*60)
     print(f"iter {_iter+1} in {len(train_loader)}, \
-        {round((_iter+1)/len(train_loader), 4) * 100}%\
+        {round((_iter+1)/len(train_loader)*100, 2)}%\
             {h}h {m}m {s}s\
             ")
 

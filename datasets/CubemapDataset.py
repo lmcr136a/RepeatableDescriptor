@@ -1,6 +1,7 @@
 """
 
 """
+import random
 import os
 import torch
 import cv2
@@ -47,7 +48,10 @@ class CubemapDataset(data.Dataset):
             self.sizer = 'No resize'
 
         self.RTfile = io.loadmat(os.path.join(self.custom_dir, 'RTDB.mat'))
-        self.Kptfile = io.loadmat(os.path.join(self.custom_dir, 'KeyPts2D3D_1024_H_thd0.25_cnt2.mat'))
+        try:
+            self.Kptfile = io.loadmat(os.path.join(self.custom_dir, 'KeyPts2D3D_1024_H100_thd0.2_230417.mat'))
+        except:
+            print("\n--\nNO Pts DB\n--\n")
         pass
 
     def __getitem__(self, index):
@@ -101,8 +105,6 @@ class CubemapDataset(data.Dataset):
             raise
         T, T_w = self.RTfile['T_unit5'][idx], self.RTfile['T_unit5'][idx_w]
         R, R_w = self.RTfile['R_unit5'][idx], self.RTfile['R_unit5'][idx_w]
-        kpts2D, kpts3D = self.Kptfile[self.custom_dir+'/'+name+'2Dkpts'], self.Kptfile[self.custom_dir+'/'+name+'_3Dkpts']
-        kpts2D_w, kpts3D_w = self.Kptfile[self.custom_dir+'/'+name_w+'2Dkpts'], self.Kptfile[self.custom_dir+'/'+name_w+'_3Dkpts']
         if 0:
             # setupnums = list(map(lambda x: x.split('setup')[-1].split('/')[0][1:], sample['image']))
             # ply_path = list(map(lambda x: os.path.join(self.custom_dir, 'ply', 'FF230120_Setup{x}.ply'), setupnums))
@@ -121,17 +123,28 @@ class CubemapDataset(data.Dataset):
             image, warped_image = np.array(image), np.array(warped_image)
 
         T, T_w, R, R_w = np.array(T), np.array(T_w),np.array(R),np.array(R_w)
-        max_kpts_num = 2650 # max kpts number
-        k2Darray, k3Darray, k2Darray_w, k3Darray_w = np.zeros((max_kpts_num, 2)), np.zeros((max_kpts_num, 3)), np.zeros((max_kpts_num, 2)), np.zeros((max_kpts_num, 3))
-        k2Darray[:len(kpts2D)] = kpts2D
-        k3Darray[:len(kpts3D)] = kpts3D
-        k2Darray_w[:len(kpts2D_w)] = kpts2D_w
-        k3Darray_w[:len(kpts3D_w)] = kpts3D_w
-        sample = {'image': image, 'warped_image': warped_image,
-                  'ply_path': ply_path, 'R': R, 'T': T, 'R_w':R_w, 'T_w':T_w,
-                  'img_path': sample['image'], 'img_path_w': sample['warped_image'],
-                  'kpts2D': k2Darray, 'kpts3D': k3Darray, 'kpts2D_w': k2Darray_w, 'kpts3D_w': k3Darray_w, 
-                  }
+        try:
+            max_kpts_num = 8000 # max kpts number
+            kpts2D, kpts3D = self.Kptfile[self.custom_dir+'/'+name+'2Dkpts'], self.Kptfile[self.custom_dir+'/'+name+'_3Dkpts']
+            kpts2D_w, kpts3D_w = self.Kptfile[self.custom_dir+'/'+name_w+'2Dkpts'], self.Kptfile[self.custom_dir+'/'+name_w+'_3Dkpts']
+            k2Darray, k3Darray, k2Darray_w, k3Darray_w = np.ones((max_kpts_num, 2))*-1, np.ones((max_kpts_num, 3))*-1, np.ones((max_kpts_num, 2))*-1, np.ones((max_kpts_num, 3))*-1
+            k2Darray[:len(kpts2D)] = kpts2D
+            k3Darray[:len(kpts3D)] = kpts3D
+            k2Darray_w[:len(kpts2D_w)] = kpts2D_w
+            k3Darray_w[:len(kpts3D_w)] = kpts3D_w
+            sample = {'image': image, 'warped_image': warped_image,
+                    'ply_path': ply_path, 'R': R, 'T': T, 'R_w':R_w, 'T_w':T_w,
+                    'img_path': sample['image'], 'img_path_w': sample['warped_image'],
+                    'kpts2D': k2Darray, 'kpts3D': k3Darray, 'kpts2D_w': k2Darray_w, 'kpts3D_w': k3Darray_w, 
+                    }
+        except:
+            print(f"\n!\nIndex {index} Error occured!")
+            print(f"img: {name}\n warped_img: {name_w}")
+            print(f"kpts2D: {len(kpts2D)}\n kpts2D_w: {kpts2D_w}")
+            newidx = random.randint(0, len(self.files['image_paths']))
+            print("Get item from alternative index: {newidx}")
+            sample = self.__getitem__(newidx)
+
         return sample
 
     def __len__(self):

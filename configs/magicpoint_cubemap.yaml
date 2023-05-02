@@ -18,7 +18,7 @@ model:
 
     batch_size:  1 # 64
     eval_batch_size: 1
-    learning_rate: 0.001
+    learning_rate: 0.1
 
     kernel_reg: 0.
     detection_threshold: 0.001 # 1/65
@@ -42,13 +42,14 @@ model:
 retrain: False # set true for new model
 reset_iter: True
 
-train_iter: 200000 # 200000
+train_iter: 2000 # 200000
 tensorboard_interval: 1000 # 200
-save_interval: 2000 # 2000
-validation_interval: 1000 # one validation of entire val set every N training steps
-validation_size: 10
-train_show_interval: 1000 # one show of the current training from to Tensorboard every N training steps
+print_interval: 10
+save_interval: 20 # 2000
+validation_interval: 10 # one validation of entire val set every N training steps
+validation_size: 1
+train_show_interval: 10 # one show of the current training from to Tensorboard every N training steps
 seed: 0
 
-pretrained: 'logs/magicpoint_synth_t2/checkpoints/3channel.pth.tar'
-# pretrained: 'logs/RD_22000/checkpoints/RD_230331_064848_epo22000_checkpoint.pth.tar'
+# pretrained: 'logs/magicpoint_synth_t2/checkpoints/3channel.pth.tar'
+pretrained: 'logs/0427_iter50/checkpoints/RD_230427_153620_iter41_checkpoint.pth.tar'

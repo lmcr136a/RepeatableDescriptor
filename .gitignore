@@ -1,7 +1,10 @@
 ####
 zzours/
 logs/
-
+runs/
+*.jpg
+*.png
+*.mat
 
 
 
