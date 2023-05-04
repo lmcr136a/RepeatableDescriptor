@@ -18,7 +18,7 @@ model:
 
     batch_size:  1 # 64
     eval_batch_size: 1
-    learning_rate: 0.1
+    learning_rate: 0.001
 
     kernel_reg: 0.
     detection_threshold: 0.001 # 1/65
@@ -52,4 +52,4 @@ train_show_interval: 10 # one show of the current training from to Tensorboard e
 seed: 0
 
 # pretrained: 'logs/magicpoint_synth_t2/checkpoints/3channel.pth.tar'
-pretrained: 'logs/0427_iter50/checkpoints/RD_230427_153620_iter41_checkpoint.pth.tar'
+pretrained: 'logs/iter333_ce/checkpoints/RD_230504_091857_iter334_checkpoint.pth.tar'
